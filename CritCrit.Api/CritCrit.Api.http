@@ -1,0 +1,6 @@
+@CritCrit.Api_HostAddress = http://localhost:5255
+
+GET {{CritCrit.Api_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###

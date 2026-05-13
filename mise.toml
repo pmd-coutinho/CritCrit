@@ -1,0 +1,7 @@
+[tools]
+dotnet = "latest"
+node = "latest"
+opencode = "latest"
+claude = "latest"
+codex = "latest"
+pi = "latest"

@@ -1,0 +1,6 @@
+<Solution>
+  <Project Path="CritCrit.Api/CritCrit.Api.csproj" />
+  <Project Path="CritCrit.AppHost/CritCrit.AppHost.csproj" />
+  <Project Path="CritCrit.ServiceDefaults/CritCrit.ServiceDefaults.csproj" />
+  <Project Path="CritCrit.Test/CritCrit.Test.csproj" />
+</Solution>

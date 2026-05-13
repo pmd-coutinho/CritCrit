@@ -1,0 +1,21 @@
+<Project Sdk="Aspire.AppHost.Sdk/13.2.4">
+
+    <PropertyGroup>
+        <OutputType>Exe</OutputType>
+        <TargetFramework>net10.0</TargetFramework>
+        <ImplicitUsings>enable</ImplicitUsings>
+        <Nullable>enable</Nullable>
+        <UserSecretsId>c9e7ffca-621e-4472-8d47-be4361e1d494</UserSecretsId>
+    </PropertyGroup>
+
+    <ItemGroup>
+      <ProjectReference Include="..\CritCrit.Api\CritCrit.Api.csproj" />
+    </ItemGroup>
+
+    <ItemGroup>
+      <PackageReference Include="Aspire.Hosting.Keycloak" Version="13.2.4-preview.1.26224.4" />
+      <PackageReference Include="Aspire.Hosting.PostgreSQL" Version="13.2.4" />
+      <PackageReference Include="Aspire.Hosting.RabbitMQ" Version="13.3.1" />
+    </ItemGroup>
+
+</Project>
