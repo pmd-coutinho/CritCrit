@@ -478,7 +478,370 @@ public class OrgHierarchyTests(ApiFixture fixture) : ContractTestWithAlba(fixtur
         });
     }
 
+    // ── Lifecycle: Archive ──
+
+    [Fact]
+    public async Task archive_store_success()
+    {
+        var (brand, store) = await CreateBrandAndStore();
+        var result = await PostAsSuperAdmin<ArchiveOrgNodeRequest, OrgNodeResponse>(
+            $"/api/brands/{brand.Id}/org-nodes/{store.Id}/archive",
+            new ArchiveOrgNodeRequest(false, "seasonal closure"));
+        Assert.True(result.Archived);
+    }
+
+    [Fact]
+    public async Task archive_force_cascades_to_children()
+    {
+        var brand = await PostAsSuperAdmin<CreateBrandRequest, OrgNodeResponse>(
+            "/api/platform/brands", new CreateBrandRequest(Code(), "Brand"));
+        var store = await PostAsSuperAdmin<CreateStoreRequest, OrgNodeResponse>(
+            $"/api/brands/{brand.Id}/stores", new CreateStoreRequest(brand.Id, Code("store"), "Store", "UTC"));
+        var device = await PostAsSuperAdmin<CreateDeviceRequest, OrgNodeResponse>(
+            $"/api/brands/{brand.Id}/devices", new CreateDeviceRequest(store.Id, "SN-FC-001", "Device", DeviceType.Kiosk));
+
+        await PostAsSuperAdmin<ArchiveOrgNodeRequest, OrgNodeResponse>(
+            $"/api/brands/{brand.Id}/org-nodes/{store.Id}/archive",
+            new ArchiveOrgNodeRequest(true, "force cascade"));
+
+        // Verify device is effectively archived
+        var deviceAfter = await GetNode(brand.Id, device.Id);
+        Assert.False(deviceAfter!.Archived);
+        Assert.True(deviceAfter.EffectiveArchived);
+    }
+
+    [Fact]
+    public async Task archive_without_force_rejected_when_has_children()
+    {
+        var brand = await PostAsSuperAdmin<CreateBrandRequest, OrgNodeResponse>(
+            "/api/platform/brands", new CreateBrandRequest(Code(), "Brand"));
+        var store = await PostAsSuperAdmin<CreateStoreRequest, OrgNodeResponse>(
+            $"/api/brands/{brand.Id}/stores", new CreateStoreRequest(brand.Id, Code("store"), "Store", "UTC"));
+        await PostAsSuperAdmin<CreateDeviceRequest, OrgNodeResponse>(
+            $"/api/brands/{brand.Id}/devices", new CreateDeviceRequest(store.Id, "SN-NF-001", "Device", DeviceType.Kiosk));
+
+        await Host.Scenario(_ =>
+        {
+            AsSuperAdmin(_);
+            _.Post.Json(new ArchiveOrgNodeRequest(false, null), JsonStyle.MinimalApi).ToUrl($"/api/brands/{brand.Id}/org-nodes/{store.Id}/archive");
+            _.StatusCodeShouldBe(HttpStatusCode.BadRequest);
+        });
+    }
+
+    [Fact]
+    public async Task archive_already_archived_rejected()
+    {
+        var (brand, store) = await CreateBrandAndStore();
+        await PostAsSuperAdmin<ArchiveOrgNodeRequest, OrgNodeResponse>(
+            $"/api/brands/{brand.Id}/org-nodes/{store.Id}/archive",
+            new ArchiveOrgNodeRequest(false, null));
+
+        await Host.Scenario(_ =>
+        {
+            AsSuperAdmin(_);
+            _.Post.Json(new ArchiveOrgNodeRequest(false, null), JsonStyle.MinimalApi).ToUrl($"/api/brands/{brand.Id}/org-nodes/{store.Id}/archive");
+            _.StatusCodeShouldBe(HttpStatusCode.BadRequest);
+        });
+    }
+
+    [Fact]
+    public async Task archive_nonexistent_node_returns_error()
+    {
+        var brand = await PostAsSuperAdmin<CreateBrandRequest, OrgNodeResponse>(
+            "/api/platform/brands", new CreateBrandRequest(Code(), "Brand"));
+        var fakeId = $"store_{Guid.CreateVersion7()}";
+
+        await Host.Scenario(_ =>
+        {
+            AsSuperAdmin(_);
+            _.Post.Json(new ArchiveOrgNodeRequest(false, null), JsonStyle.MinimalApi).ToUrl($"/api/brands/{brand.Id}/org-nodes/{fakeId}/archive");
+            _.StatusCodeShouldBe(HttpStatusCode.BadRequest);
+        });
+    }
+
+    // ── Lifecycle: Restore ──
+
+    [Fact]
+    public async Task restore_archived_store()
+    {
+        var (brand, store) = await CreateBrandAndStore();
+        await PostAsSuperAdmin<ArchiveOrgNodeRequest, OrgNodeResponse>(
+            $"/api/brands/{brand.Id}/org-nodes/{store.Id}/archive",
+            new ArchiveOrgNodeRequest(false, null));
+
+        await Host.Scenario(_ =>
+        {
+            AsSuperAdmin(_);
+            _.Post.Json(new { }, JsonStyle.MinimalApi).ToUrl($"/api/brands/{brand.Id}/org-nodes/{store.Id}/restore");
+            _.StatusCodeShouldBe(HttpStatusCode.OK);
+        });
+    }
+
+    [Fact]
+    public async Task restore_not_archived_rejected()
+    {
+        var (brand, store) = await CreateBrandAndStore();
+
+        await Host.Scenario(_ =>
+        {
+            AsSuperAdmin(_);
+            _.Post.Json(new { }, JsonStyle.MinimalApi).ToUrl($"/api/brands/{brand.Id}/org-nodes/{store.Id}/restore");
+            _.StatusCodeShouldBe(HttpStatusCode.BadRequest);
+        });
+    }
+
+    [Fact]
+    public async Task restore_hard_deleted_rejected()
+    {
+        var (brand, store) = await CreateBrandAndStore();
+        await Host.Scenario(_ =>
+        {
+            AsSuperAdmin(_);
+            _.Post.Json(new HardDeleteOrgNodeRequest("test"), JsonStyle.MinimalApi).ToUrl($"/api/brands/{brand.Id}/org-nodes/{store.Id}/hard-delete");
+            _.StatusCodeShouldBe(HttpStatusCode.NoContent);
+        });
+
+        await Host.Scenario(_ =>
+        {
+            AsSuperAdmin(_);
+            _.Post.Json(new { }, JsonStyle.MinimalApi).ToUrl($"/api/brands/{brand.Id}/org-nodes/{store.Id}/restore");
+            _.StatusCodeShouldBe(HttpStatusCode.BadRequest);
+        });
+    }
+
+    // ── Lifecycle: Hard Delete ──
+
+    [Fact]
+    public async Task hard_delete_store_cascades_to_device()
+    {
+        var brand = await PostAsSuperAdmin<CreateBrandRequest, OrgNodeResponse>(
+            "/api/platform/brands", new CreateBrandRequest(Code(), "Brand"));
+        var store = await PostAsSuperAdmin<CreateStoreRequest, OrgNodeResponse>(
+            $"/api/brands/{brand.Id}/stores", new CreateStoreRequest(brand.Id, Code("store"), "Store", "UTC"));
+        await PostAsSuperAdmin<CreateDeviceRequest, OrgNodeResponse>(
+            $"/api/brands/{brand.Id}/devices", new CreateDeviceRequest(store.Id, "SN-HD-001", "Device", DeviceType.Kiosk));
+
+        await Host.Scenario(_ =>
+        {
+            AsSuperAdmin(_);
+            _.Post.Json(new HardDeleteOrgNodeRequest("cleanup"), JsonStyle.MinimalApi).ToUrl($"/api/brands/{brand.Id}/org-nodes/{store.Id}/hard-delete");
+            _.StatusCodeShouldBe(HttpStatusCode.NoContent);
+        });
+    }
+
+    [Fact]
+    public async Task hard_delete_already_deleted_rejected()
+    {
+        var (brand, store) = await CreateBrandAndStore();
+        await Host.Scenario(_ =>
+        {
+            AsSuperAdmin(_);
+            _.Post.Json(new HardDeleteOrgNodeRequest("first"), JsonStyle.MinimalApi).ToUrl($"/api/brands/{brand.Id}/org-nodes/{store.Id}/hard-delete");
+            _.StatusCodeShouldBe(HttpStatusCode.NoContent);
+        });
+
+        await Host.Scenario(_ =>
+        {
+            AsSuperAdmin(_);
+            _.Post.Json(new HardDeleteOrgNodeRequest("second"), JsonStyle.MinimalApi).ToUrl($"/api/brands/{brand.Id}/org-nodes/{store.Id}/hard-delete");
+            _.StatusCodeShouldBe(HttpStatusCode.BadRequest);
+        });
+    }
+
+    [Fact]
+    public async Task hard_delete_reason_required()
+    {
+        var (brand, store) = await CreateBrandAndStore();
+
+        await Host.Scenario(_ =>
+        {
+            AsSuperAdmin(_);
+            _.Post.Json(new HardDeleteOrgNodeRequest(""), JsonStyle.MinimalApi).ToUrl($"/api/brands/{brand.Id}/org-nodes/{store.Id}/hard-delete");
+            _.StatusCodeShouldBe(HttpStatusCode.BadRequest);
+        });
+    }
+
+    // ── Lifecycle: Move ──
+
+    [Fact]
+    public async Task move_store_to_country()
+    {
+        var brand = await PostAsSuperAdmin<CreateBrandRequest, OrgNodeResponse>(
+            "/api/platform/brands", new CreateBrandRequest(Code(), "Brand"));
+        var country = await PostAsSuperAdmin<CreatePlainOrgNodeRequest, OrgNodeResponse>(
+            $"/api/brands/{brand.Id}/countries",
+            new CreatePlainOrgNodeRequest(brand.Id, "DE", "Germany"));
+        var store = await PostAsSuperAdmin<CreateStoreRequest, OrgNodeResponse>(
+            $"/api/brands/{brand.Id}/stores",
+            new CreateStoreRequest(brand.Id, Code("store"), "Store", "UTC"));
+
+        var moved = await PostAsSuperAdmin<MoveOrgNodeRequest, OrgNodeResponse>(
+            $"/api/brands/{brand.Id}/org-nodes/{store.Id}/move",
+            new MoveOrgNodeRequest(country.Id, "reorg"));
+
+        Assert.Equal(country.Id, moved.ParentId);
+    }
+
+    [Fact]
+    public async Task move_to_same_parent_rejected()
+    {
+        var (brand, store) = await CreateBrandAndStore();
+
+        await Host.Scenario(_ =>
+        {
+            AsSuperAdmin(_);
+            _.Post.Json(new MoveOrgNodeRequest(brand.Id, "same"), JsonStyle.MinimalApi).ToUrl($"/api/brands/{brand.Id}/org-nodes/{store.Id}/move");
+            _.StatusCodeShouldBe(HttpStatusCode.BadRequest);
+        });
+    }
+
+    [Fact]
+    public async Task move_under_own_descendant_rejected()
+    {
+        var brand = await PostAsSuperAdmin<CreateBrandRequest, OrgNodeResponse>(
+            "/api/platform/brands", new CreateBrandRequest(Code(), "Brand"));
+        var store = await PostAsSuperAdmin<CreateStoreRequest, OrgNodeResponse>(
+            $"/api/brands/{brand.Id}/stores", new CreateStoreRequest(brand.Id, Code("store"), "Store", "UTC"));
+        var device = await PostAsSuperAdmin<CreateDeviceRequest, OrgNodeResponse>(
+            $"/api/brands/{brand.Id}/devices", new CreateDeviceRequest(store.Id, "SN-MD-001", "Device", DeviceType.Kiosk));
+
+        // Try to move store under its own device (cycle)
+        await Host.Scenario(_ =>
+        {
+            AsSuperAdmin(_);
+            _.Post.Json(new MoveOrgNodeRequest(device.Id, "cycle"), JsonStyle.MinimalApi).ToUrl($"/api/brands/{brand.Id}/org-nodes/{store.Id}/move");
+            _.StatusCodeShouldBe(HttpStatusCode.BadRequest);
+        });
+    }
+
+    [Fact]
+    public async Task move_to_invalid_parent_type_rejected()
+    {
+        var brand = await PostAsSuperAdmin<CreateBrandRequest, OrgNodeResponse>(
+            "/api/platform/brands", new CreateBrandRequest(Code(), "Brand"));
+        var store = await PostAsSuperAdmin<CreateStoreRequest, OrgNodeResponse>(
+            $"/api/brands/{brand.Id}/stores", new CreateStoreRequest(brand.Id, Code("store"), "Store", "UTC"));
+        var device = await PostAsSuperAdmin<CreateDeviceRequest, OrgNodeResponse>(
+            $"/api/brands/{brand.Id}/devices", new CreateDeviceRequest(store.Id, "SN-MT-001", "Device", DeviceType.Kiosk));
+
+        // Try to move store under a device (invalid: Store cannot be under Device)
+        await Host.Scenario(_ =>
+        {
+            AsSuperAdmin(_);
+            _.Post.Json(new MoveOrgNodeRequest(device.Id, "invalid"), JsonStyle.MinimalApi).ToUrl($"/api/brands/{brand.Id}/org-nodes/{store.Id}/move");
+            _.StatusCodeShouldBe(HttpStatusCode.BadRequest);
+        });
+    }
+
+    [Fact]
+    public async Task move_updates_descendant_paths()
+    {
+        var brand = await PostAsSuperAdmin<CreateBrandRequest, OrgNodeResponse>(
+            "/api/platform/brands", new CreateBrandRequest(Code(), "Brand"));
+        var country = await PostAsSuperAdmin<CreatePlainOrgNodeRequest, OrgNodeResponse>(
+            $"/api/brands/{brand.Id}/countries",
+            new CreatePlainOrgNodeRequest(brand.Id, "FR", "France"));
+        var store = await PostAsSuperAdmin<CreateStoreRequest, OrgNodeResponse>(
+            $"/api/brands/{brand.Id}/stores", new CreateStoreRequest(brand.Id, Code("store"), "Paris Store", "UTC"));
+        var device = await PostAsSuperAdmin<CreateDeviceRequest, OrgNodeResponse>(
+            $"/api/brands/{brand.Id}/devices", new CreateDeviceRequest(store.Id, "SN-MP-001", "Kiosk 1", DeviceType.Kiosk));
+
+        await PostAsSuperAdmin<MoveOrgNodeRequest, OrgNodeResponse>(
+            $"/api/brands/{brand.Id}/org-nodes/{store.Id}/move",
+            new MoveOrgNodeRequest(country.Id, "reorg"));
+
+        // Verify device path updated
+        var deviceAfter = await GetNode(brand.Id, device.Id);
+        Assert.Contains("/country/", deviceAfter!.Path, StringComparison.Ordinal);
+    }
+
+    // ── Lifecycle: Authorization ──
+
+    [Fact]
+    public async Task non_admin_cannot_archive()
+    {
+        var (brand, store) = await CreateBrandAndStore();
+
+        await Host.Scenario(_ =>
+        {
+            AsPlainUser(_, "regular-user");
+            _.Post.Json(new ArchiveOrgNodeRequest(false, null), JsonStyle.MinimalApi).ToUrl($"/api/brands/{brand.Id}/org-nodes/{store.Id}/archive");
+            _.StatusCodeShouldBe(HttpStatusCode.Forbidden);
+        });
+    }
+
+    [Fact]
+    public async Task non_admin_cannot_move()
+    {
+        var brand = await PostAsSuperAdmin<CreateBrandRequest, OrgNodeResponse>(
+            "/api/platform/brands", new CreateBrandRequest(Code(), "Brand"));
+        var country = await PostAsSuperAdmin<CreatePlainOrgNodeRequest, OrgNodeResponse>(
+            $"/api/brands/{brand.Id}/countries",
+            new CreatePlainOrgNodeRequest(brand.Id, "PT", "Portugal"));
+        var store = await PostAsSuperAdmin<CreateStoreRequest, OrgNodeResponse>(
+            $"/api/brands/{brand.Id}/stores", new CreateStoreRequest(brand.Id, Code("store"), "Store", "UTC"));
+
+        await Host.Scenario(_ =>
+        {
+            AsPlainUser(_, "regular-user");
+            _.Post.Json(new MoveOrgNodeRequest(country.Id, "reorg"), JsonStyle.MinimalApi).ToUrl($"/api/brands/{brand.Id}/org-nodes/{store.Id}/move");
+            _.StatusCodeShouldBe(HttpStatusCode.Forbidden);
+        });
+    }
+
+    [Fact]
+    public async Task non_superadmin_cannot_hard_delete()
+    {
+        var (brand, store) = await CreateBrandAndStore();
+
+        await Host.Scenario(_ =>
+        {
+            AsPlainUser(_, "regular-user");
+            _.Post.Json(new HardDeleteOrgNodeRequest("test"), JsonStyle.MinimalApi).ToUrl($"/api/brands/{brand.Id}/org-nodes/{store.Id}/hard-delete");
+            _.StatusCodeShouldBe(HttpStatusCode.Forbidden);
+        });
+    }
+
     // ── Helpers ──
+
+    private async Task<(OrgNodeResponse Brand, OrgNodeResponse Store)> CreateBrandAndStore()
+    {
+        var brand = await PostAsSuperAdmin<CreateBrandRequest, OrgNodeResponse>(
+            "/api/platform/brands", new CreateBrandRequest(Code("lb"), "Lifecycle Brand"));
+        var store = await PostAsSuperAdmin<CreateStoreRequest, OrgNodeResponse>(
+            $"/api/brands/{brand.Id}/stores", new CreateStoreRequest(brand.Id, Code("store"), "Lifecycle Store", "UTC"));
+        return (brand, store);
+    }
+
+    private async Task<OrgNodeResponse?> GetNode(string brandId, string nodeId)
+    {
+        var result = await Host.Scenario(_ =>
+        {
+            AsSuperAdmin(_);
+            _.Get.Url($"/api/brands/{brandId}/org-nodes/{nodeId}");
+        });
+        if (result.Context.Response.StatusCode != 200)
+            return null;
+        return await result.ReadAsJsonAsync<OrgNodeResponse>();
+    }
+
+    private async Task<IScenarioResult> PostAsSuperAdminWithoutBody<TRequest>(string url, TRequest request)
+    {
+        return await Host.Scenario(_ =>
+        {
+            AsSuperAdmin(_);
+            _.Post.Json(request!, JsonStyle.MinimalApi).ToUrl(url);
+        });
+    }
+
+    private async Task PostAsSuperAdminNoBody(string url)
+    {
+        await Host.Scenario(_ =>
+        {
+            AsSuperAdmin(_);
+            _.Post.Json(new { }, JsonStyle.MinimalApi).ToUrl(url);
+        });
+    }
 
     private async Task<TResponse> PostAsSuperAdmin<TRequest, TResponse>(string url, TRequest request)
     {

@@ -20,7 +20,7 @@ public readonly record struct InvitationId(Guid Value)
 
     public override string ToString() => Value.ToString();
 }
-
+ 
 public readonly record struct AuditEventId(Guid Value)
 {
     public static AuditEventId New() => new(Guid.CreateVersion7());

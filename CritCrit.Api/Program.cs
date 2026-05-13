@@ -110,6 +110,7 @@ builder.Services.AddMarten(m =>
     m.Projections.Add<SubjectProjection>(ProjectionLifecycle.Inline);
     m.Projections.Add<ExternalIdentityProjection>(ProjectionLifecycle.Inline);
     m.Projections.Add<GrantProjection>(ProjectionLifecycle.Inline);
+    m.Projections.Add<MoveOrgNodeProjection>(ProjectionLifecycle.Inline);
 })
  .ApplyAllDatabaseChangesOnStartup()
  // This will remove some runtime overhead from Marten

@@ -29,3 +29,9 @@ public sealed record OrgNodeResponse(
 public sealed record SubjectResponse(string Id, string Email, string? DisplayName);
 
 public sealed record GrantResponse(string Id, string OrgNodeId, string SubjectId, OrgRole Role, DateTimeOffset? ExpiresAt);
+
+public sealed record ArchiveOrgNodeRequest(bool Force, string? Reason);
+
+public sealed record HardDeleteOrgNodeRequest(string Reason);
+
+public sealed record MoveOrgNodeRequest(string NewParentId, string Reason);

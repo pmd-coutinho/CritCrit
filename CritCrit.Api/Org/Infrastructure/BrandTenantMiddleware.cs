@@ -37,7 +37,10 @@ public sealed class BrandTenantMiddleware(RequestDelegate next)
 
     private static bool IsAllowedForArchivedBrand(HttpContext context) =>
         context.Request.Path.Value?.Contains("/restore", StringComparison.OrdinalIgnoreCase) == true ||
-        context.Request.Path.Value?.Contains("/audit", StringComparison.OrdinalIgnoreCase) == true;
+        context.Request.Path.Value?.Contains("/audit", StringComparison.OrdinalIgnoreCase) == true ||
+        context.Request.Path.Value?.Contains("/archive", StringComparison.OrdinalIgnoreCase) == true ||
+        context.Request.Path.Value?.Contains("/hard-delete", StringComparison.OrdinalIgnoreCase) == true ||
+        context.Request.Path.Value?.Contains("/move", StringComparison.OrdinalIgnoreCase) == true;
 
     private static bool TryFindBrandId(PathString path, out string brandId)
     {

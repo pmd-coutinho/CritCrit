@@ -37,4 +37,20 @@ public static class OrgValidation
             throw new DomainException("Org node is inactive.");
         return node;
     }
+
+    public static async Task<IReadOnlyList<OrgNodeReadModel>> LoadDescendantsAsync(
+        IQuerySession session, OrgNodeId ancestorId, Guid tenantId, CancellationToken ct)
+    {
+        return await session.Query<OrgNodeReadModel>()
+            .Where(x => x.TenantId == tenantId && x.AncestorIds.Contains(ancestorId.Value) && !x.HardDeleted)
+            .ToListAsync(ct);
+    }
+
+    public static async Task<bool> HasActiveChildrenAsync(
+        IQuerySession session, OrgNodeId parentId, Guid tenantId, CancellationToken ct)
+    {
+        return await session.Query<OrgNodeReadModel>()
+            .Where(x => x.TenantId == tenantId && x.ParentId == parentId.Value && !x.HardDeleted && !x.EffectiveArchived)
+            .AnyAsync(ct);
+    }
 }
