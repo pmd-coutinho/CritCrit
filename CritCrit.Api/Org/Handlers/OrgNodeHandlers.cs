@@ -1,3 +1,4 @@
+using CritCrit.Api.Org.Auth;
 using CritCrit.Api.Org.Domain;
 using CritCrit.Api.Org.Endpoints;
 using CritCrit.Api.Org.Infrastructure;
@@ -8,127 +9,153 @@ namespace CritCrit.Api.Org.Handlers;
 
 public static class OrgNodeHandlers
 {
-    [WolverineGet("/api/brands/{brandId}/org-nodes/{nodeId}")]
-    public static async Task<IResult> GetNode(
-        string nodeId,
-        IDocumentStore store,
-        HttpContext httpContext,
-        CancellationToken ct)
-    {
-        var tenant = HandlerContext.GetTenant(httpContext);
-        await using var session = HandlerContext.TenantSession(store, tenant);
-
-        if (!OrgPublicId.TryParseOrgNode(nodeId, out var id, out _))
-            return Results.NotFound();
-
-        var node = await session.LoadAsync<OrgNodeReadModel>(id.Value, ct);
-        if (node is null || node.TenantId != tenant.TenantId.Value)
-            return Results.NotFound();
-
-        return Results.Ok(BrandHandlers.ToResponse(node));
-    }
-
     [WolverinePost("/api/brands/{brandId}/countries")]
     public static async Task<OrgNodeResponse> CreateCountry(
         CreatePlainOrgNodeRequest request,
+        string brandId,
         IDocumentStore store,
-        OrgCommandService commands,
         OrgAuthorizationService authorization,
         HttpContext httpContext,
         CancellationToken ct)
     {
         var tenant = HandlerContext.GetTenant(httpContext);
         await using var session = HandlerContext.TenantSession(store, tenant);
-        var actor = httpContext.GetActor();
+        var actor = await HandlerContext.ResolveActorAsync(httpContext, store, ct);
 
         if (!OrgPublicId.TryParseOrgNode(request.ParentId, out var parentId, out _))
             throw new DomainException("Invalid parent ID.");
 
-        var parent = await session.LoadAsync<OrgNodeReadModel>(parentId.Value, ct)
-            ?? throw new DomainException("Parent org node not found.");
-        await authorization.EnforceRoleAsync(session, actor, parent, OrgRole.Admin, ct);
+        var parent = await ValidateParent(session, actor, authorization, tenant.TenantId.Value, parentId, OrgNodeType.Country, ct);
 
-        var node = await commands.CreatePlainNodeAsync(session, actor, tenant.TenantId, parentId,
-            OrgNodeType.Country, request.Code, request.Name, ct);
+        var normalized = OrgValidation.ValidateAndNormalizeCode(OrgNodeType.Country, request.Code);
+        await OrgValidation.EnsureCodeAvailableAsync(session, tenant.TenantId, normalized, ct);
 
+        var id = OrgNodeId.New();
+        session.Events.StartStream<OrgNodeReadModel>(id.Value,
+            new OrgNodeCreated(id, tenant.TenantId, parentId, OrgNodeType.Country, request.Code.Trim(), normalized, request.Name.Trim()));
+
+        await session.SaveChangesAsync(ct);
+        var node = await session.LoadAsync<OrgNodeReadModel>(id.Value, ct)
+            ?? throw new InvalidOperationException("Projection failed to create OrgNodeReadModel.");
         return BrandHandlers.ToResponse(node);
     }
 
     [WolverinePost("/api/brands/{brandId}/franchises")]
     public static async Task<OrgNodeResponse> CreateFranchise(
         CreatePlainOrgNodeRequest request,
+        string brandId,
         IDocumentStore store,
-        OrgCommandService commands,
         OrgAuthorizationService authorization,
         HttpContext httpContext,
         CancellationToken ct)
     {
         var tenant = HandlerContext.GetTenant(httpContext);
         await using var session = HandlerContext.TenantSession(store, tenant);
-        var actor = httpContext.GetActor();
+        var actor = await HandlerContext.ResolveActorAsync(httpContext, store, ct);
 
         if (!OrgPublicId.TryParseOrgNode(request.ParentId, out var parentId, out _))
             throw new DomainException("Invalid parent ID.");
 
-        var parent = await session.LoadAsync<OrgNodeReadModel>(parentId.Value, ct)
-            ?? throw new DomainException("Parent org node not found.");
-        await authorization.EnforceRoleAsync(session, actor, parent, OrgRole.Admin, ct);
+        var parent = await ValidateParent(session, actor, authorization, tenant.TenantId.Value, parentId, OrgNodeType.Franchise, ct);
 
-        var node = await commands.CreatePlainNodeAsync(session, actor, tenant.TenantId, parentId,
-            OrgNodeType.Franchise, request.Code, request.Name, ct);
+        var normalized = OrgValidation.ValidateAndNormalizeCode(OrgNodeType.Franchise, request.Code);
+        await OrgValidation.EnsureCodeAvailableAsync(session, tenant.TenantId, normalized, ct);
 
+        var id = OrgNodeId.New();
+        session.Events.StartStream<OrgNodeReadModel>(id.Value,
+            new OrgNodeCreated(id, tenant.TenantId, parentId, OrgNodeType.Franchise, request.Code.Trim(), normalized, request.Name.Trim()));
+
+        await session.SaveChangesAsync(ct);
+        var node = await session.LoadAsync<OrgNodeReadModel>(id.Value, ct)
+            ?? throw new InvalidOperationException("Projection failed to create OrgNodeReadModel.");
         return BrandHandlers.ToResponse(node);
     }
 
     [WolverinePost("/api/brands/{brandId}/stores")]
     public static async Task<OrgNodeResponse> CreateStore(
         CreateStoreRequest request,
+        string brandId,
         IDocumentStore store,
-        OrgCommandService commands,
         OrgAuthorizationService authorization,
         HttpContext httpContext,
         CancellationToken ct)
     {
         var tenant = HandlerContext.GetTenant(httpContext);
         await using var session = HandlerContext.TenantSession(store, tenant);
-        var actor = httpContext.GetActor();
+        var actor = await HandlerContext.ResolveActorAsync(httpContext, store, ct);
 
         if (!OrgPublicId.TryParseOrgNode(request.ParentId, out var parentId, out _))
             throw new DomainException("Invalid parent ID.");
 
-        var parent = await session.LoadAsync<OrgNodeReadModel>(parentId.Value, ct)
-            ?? throw new DomainException("Parent org node not found.");
-        await authorization.EnforceRoleAsync(session, actor, parent, OrgRole.Admin, ct);
+        var parent = await ValidateParent(session, actor, authorization, tenant.TenantId.Value, parentId, OrgNodeType.Store, ct);
 
-        var node = await commands.CreateStoreAsync(session, actor, tenant.TenantId, parentId,
-            request.Code, request.Name, request.TimeZone ?? "UTC", ct);
+        var normalized = OrgValidation.ValidateAndNormalizeCode(OrgNodeType.Store, request.Code);
+        await OrgValidation.EnsureCodeAvailableAsync(session, tenant.TenantId, normalized, ct);
 
+        var id = OrgNodeId.New();
+        var tz = string.IsNullOrWhiteSpace(request.TimeZone) ? "UTC" : request.TimeZone.Trim();
+        session.Events.StartStream<OrgNodeReadModel>(id.Value,
+            new OrgNodeCreated(id, tenant.TenantId, parentId, OrgNodeType.Store, request.Code.Trim(), normalized, request.Name.Trim()));
+        session.Events.Append(id.Value,
+            new StoreProfileCreated(id, tz));
+
+        await session.SaveChangesAsync(ct);
+        var node = await session.LoadAsync<OrgNodeReadModel>(id.Value, ct)
+            ?? throw new InvalidOperationException("Projection failed to create OrgNodeReadModel.");
         return BrandHandlers.ToResponse(node);
     }
 
     [WolverinePost("/api/brands/{brandId}/devices")]
     public static async Task<OrgNodeResponse> CreateDevice(
         CreateDeviceRequest request,
+        string brandId,
         IDocumentStore store,
-        OrgCommandService commands,
         OrgAuthorizationService authorization,
         HttpContext httpContext,
         CancellationToken ct)
     {
         var tenant = HandlerContext.GetTenant(httpContext);
         await using var session = HandlerContext.TenantSession(store, tenant);
-        var actor = httpContext.GetActor();
+        var actor = await HandlerContext.ResolveActorAsync(httpContext, store, ct);
 
         if (!OrgPublicId.TryParseOrgNode(request.ParentStoreId, OrgNodeType.Store, out var parentStoreId))
             throw new DomainException("Invalid parent store ID.");
 
-        var parent = await session.LoadAsync<OrgNodeReadModel>(parentStoreId.Value, ct)
-            ?? throw new DomainException("Parent store not found.");
-        await authorization.EnforceRoleAsync(session, actor, parent, OrgRole.Admin, ct);
+        var parent = await ValidateParent(session, actor, authorization, tenant.TenantId.Value, parentStoreId, OrgNodeType.Device, ct);
 
-        var node = await commands.CreateDeviceAsync(session, actor, tenant.TenantId, parentStoreId,
-            request.SerialNumber, request.Name, request.DeviceType, ct);
+        var normalized = OrgValidation.ValidateAndNormalizeCode(OrgNodeType.Device, request.SerialNumber);
+        await OrgValidation.EnsureCodeAvailableAsync(session, tenant.TenantId, normalized, ct);
 
+        var id = OrgNodeId.New();
+        session.Events.StartStream<OrgNodeReadModel>(id.Value,
+            new OrgNodeCreated(id, tenant.TenantId, parentStoreId, OrgNodeType.Device, request.SerialNumber.Trim(), normalized, request.Name.Trim()));
+        session.Events.Append(id.Value,
+            new DeviceProfileCreated(id, request.SerialNumber.Trim(), request.DeviceType));
+
+        await session.SaveChangesAsync(ct);
+        var node = await session.LoadAsync<OrgNodeReadModel>(id.Value, ct)
+            ?? throw new InvalidOperationException("Projection failed to create OrgNodeReadModel.");
         return BrandHandlers.ToResponse(node);
+    }
+
+    private static async Task<OrgNodeReadModel> ValidateParent(
+        IDocumentSession session,
+        ActorContext actor,
+        OrgAuthorizationService authorization,
+        Guid tenantId,
+        OrgNodeId parentId,
+        OrgNodeType childType,
+        CancellationToken ct)
+    {
+        var parent = await OrgValidation.LoadActiveNodeAsync(session, parentId, ct);
+
+        if (parent.TenantId != tenantId)
+            throw new DomainException("Org node does not belong to the requested brand tenant.");
+
+        if (!OrgRules.CanContain(parent.Type, childType))
+            throw new DomainException($"{parent.Type} cannot contain {childType}.");
+
+        await authorization.EnforceRoleAsync(session, actor, parent, OrgRole.Admin, ct);
+        return parent;
     }
 }

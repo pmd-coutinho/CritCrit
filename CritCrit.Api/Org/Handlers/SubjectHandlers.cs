@@ -12,22 +12,24 @@ public static class SubjectHandlers
     public static async Task<SubjectResponse> CreateSubject(
         CreateSubjectRequest request,
         IDocumentStore store,
-        OrgCommandService commands,
         OrgAuthorizationService authorization,
         HttpContext httpContext,
         CancellationToken ct)
     {
-        var actor = httpContext.GetActor();
+        var actor = await HandlerContext.ResolveActorAsync(httpContext, store, ct);
         authorization.EnforceSuperAdmin(actor);
 
         await using var session = HandlerContext.PlatformSession(store);
+        var id = SubjectId.New();
 
-        var subject = await commands.CreateSubjectAsync(
-            session, actor,
-            request.Email, request.DisplayName,
-            request.Provider, request.ProviderTenant, request.ExternalId,
-            ct);
+        session.Events.StartStream<SubjectReadModel>(id.Value,
+            new SubjectCreated(id, SubjectKind.User, request.Email.Trim(), request.DisplayName?.Trim()));
+        session.Events.Append(id.Value,
+            new ExternalIdentityLinked(id, request.Provider, request.ProviderTenant, request.ExternalId));
 
+        await session.SaveChangesAsync(ct);
+        var subject = await session.LoadAsync<SubjectReadModel>(id.Value, ct)
+            ?? throw new InvalidOperationException("Projection failed to create SubjectReadModel.");
         return new SubjectResponse(subject.PublicId, subject.Email, subject.DisplayName);
     }
 }

@@ -150,7 +150,6 @@ builder.Services.AddWolverine(opts =>
 
 builder.Services.AddWolverineHttp();
 builder.Services.AddScoped<OrgAuthorizationService>();
-builder.Services.AddScoped<OrgCommandService>();
 
 if (builder.Environment.IsEnvironment("Testing"))
 {
@@ -242,8 +241,6 @@ app.MapWolverineEndpoints(c =>
     c.UseFluentValidationProblemDetailMiddleware();
     c.ServiceProviderSource = ServiceProviderSource.FromHttpContextRequestServices;
     c.SourceServiceFromHttpContext<IDocumentStore>();
-    c.SourceServiceFromHttpContext<OrgCommandService>();
-    c.AddPolicy<OrgHttpPolicy>();
 });
 
 return await app.RunJasperFxCommands(args);
