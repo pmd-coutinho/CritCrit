@@ -69,4 +69,22 @@ public sealed class OrgAuthorizationService
 
         return inherited is not null && inherited.Value >= role;
     }
+
+    public void EnforceSuperAdmin(ActorContext actor)
+    {
+        if (!actor.IsSuperAdmin)
+            throw new DomainException("SuperAdmin access required.", 403);
+    }
+
+    public async Task EnforceRoleAsync(
+        IQuerySession session,
+        ActorContext actor,
+        OrgNodeReadModel target,
+        OrgRole required,
+        CancellationToken ct)
+    {
+        var result = await RequireRoleAsync(session, actor, target, required, TimeProvider.System.GetUtcNow(), ct);
+        if (!result.Succeeded)
+            throw new DomainException(result.Error!, 403);
+    }
 }

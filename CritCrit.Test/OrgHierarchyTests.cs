@@ -81,6 +81,405 @@ public class OrgHierarchyTests(ApiFixture fixture) : ContractTestWithAlba(fixtur
         });
     }
 
+    // ── Authorization ──
+
+    [Fact]
+    public async Task non_superadmin_cannot_create_brand()
+    {
+        await Host.Scenario(_ =>
+        {
+            AsPlainUser(_, "regular-user");
+            _.Post.Json(new CreateBrandRequest(Code(), "Brand"), JsonStyle.MinimalApi).ToUrl("/api/platform/brands");
+            _.StatusCodeShouldBe(HttpStatusCode.Forbidden);
+        });
+    }
+
+    [Fact]
+    public async Task non_superadmin_cannot_create_subject()
+    {
+        await Host.Scenario(_ =>
+        {
+            AsPlainUser(_, "regular-user");
+            _.Post.Json(new CreateSubjectRequest("user@example.com", "User", "test", "default", "regular-user"), JsonStyle.MinimalApi).ToUrl("/api/platform/subjects");
+            _.StatusCodeShouldBe(HttpStatusCode.Forbidden);
+        });
+    }
+
+    [Fact]
+    public async Task non_admin_cannot_grant_role()
+    {
+        var brand = await PostAsSuperAdmin<CreateBrandRequest, OrgNodeResponse>(
+            "/api/platform/brands",
+            new CreateBrandRequest(Code(), "Brand"));
+
+        var store = await PostAsSuperAdmin<CreateStoreRequest, OrgNodeResponse>(
+            $"/api/brands/{brand.Id}/stores",
+            new CreateStoreRequest(brand.Id, Code("store"), "Store", "UTC"));
+
+        var granter = await PostAsSuperAdmin<CreateSubjectRequest, SubjectResponse>(
+            "/api/platform/subjects",
+            new CreateSubjectRequest("granter@example.com", "Granter", "test", "default", "granter-idp"));
+
+        var target = await PostAsSuperAdmin<CreateSubjectRequest, SubjectResponse>(
+            "/api/platform/subjects",
+            new CreateSubjectRequest("target@example.com", "Target", "test", "default", "target-idp"));
+
+        await Host.Scenario(_ =>
+        {
+            AsUser(_, "granter-idp", "granter@example.com");
+            _.Post.Json(new GrantRoleRequest(store.Id, target.Id, OrgRole.Member, null), JsonStyle.MinimalApi).ToUrl($"/api/brands/{brand.Id}/access-grants");
+            _.StatusCodeShouldBe(HttpStatusCode.Forbidden);
+        });
+    }
+
+    [Fact]
+    public async Task superadmin_can_grant_owner_at_brand()
+    {
+        var brand = await PostAsSuperAdmin<CreateBrandRequest, OrgNodeResponse>(
+            "/api/platform/brands",
+            new CreateBrandRequest(Code(), "Brand"));
+
+        var subject = await PostAsSuperAdmin<CreateSubjectRequest, SubjectResponse>(
+            "/api/platform/subjects",
+            new CreateSubjectRequest("owner@example.com", "Owner", "test", "default", "owner-idp"));
+
+        var grant = await PostAsSuperAdmin<GrantRoleRequest, GrantResponse>(
+            $"/api/brands/{brand.Id}/access-grants",
+            new GrantRoleRequest(brand.Id, subject.Id, OrgRole.Owner, null));
+
+        Assert.Equal(OrgRole.Owner, grant.Role);
+    }
+
+    // ── Data Integrity ──
+
+    [Fact]
+    public async Task code_uniqueness_enforced_within_tenant()
+    {
+        var brand = await PostAsSuperAdmin<CreateBrandRequest, OrgNodeResponse>(
+            "/api/platform/brands",
+            new CreateBrandRequest(Code(), "Brand"));
+
+        await PostAsSuperAdmin<CreateStoreRequest, OrgNodeResponse>(
+            $"/api/brands/{brand.Id}/stores",
+            new CreateStoreRequest(brand.Id, "dup-store", "Store One", "UTC"));
+
+        await Host.Scenario(_ =>
+        {
+            AsSuperAdmin(_);
+            _.Post.Json(new CreateStoreRequest(brand.Id, "dup-store", "Store Two", "UTC"), JsonStyle.MinimalApi).ToUrl($"/api/brands/{brand.Id}/stores");
+            _.StatusCodeShouldBe(HttpStatusCode.BadRequest);
+        });
+    }
+
+    [Fact]
+    public async Task same_code_allowed_across_tenants()
+    {
+        var brandA = await PostAsSuperAdmin<CreateBrandRequest, OrgNodeResponse>(
+            "/api/platform/brands",
+            new CreateBrandRequest(Code(), "Brand A"));
+
+        var brandB = await PostAsSuperAdmin<CreateBrandRequest, OrgNodeResponse>(
+            "/api/platform/brands",
+            new CreateBrandRequest(Code(), "Brand B"));
+
+        var storeA = await PostAsSuperAdmin<CreateStoreRequest, OrgNodeResponse>(
+            $"/api/brands/{brandA.Id}/stores",
+            new CreateStoreRequest(brandA.Id, "cross-tenant", "Store A", "UTC"));
+
+        var storeB = await PostAsSuperAdmin<CreateStoreRequest, OrgNodeResponse>(
+            $"/api/brands/{brandB.Id}/stores",
+            new CreateStoreRequest(brandB.Id, "cross-tenant", "Store B", "UTC"));
+
+        Assert.NotEqual(storeA.Id, storeB.Id);
+    }
+
+    [Fact]
+    public async Task tenant_isolation_node_not_found_via_wrong_brand()
+    {
+        var brandA = await PostAsSuperAdmin<CreateBrandRequest, OrgNodeResponse>(
+            "/api/platform/brands",
+            new CreateBrandRequest(Code(), "Brand A"));
+
+        var brandB = await PostAsSuperAdmin<CreateBrandRequest, OrgNodeResponse>(
+            "/api/platform/brands",
+            new CreateBrandRequest(Code(), "Brand B"));
+
+        var store = await PostAsSuperAdmin<CreateStoreRequest, OrgNodeResponse>(
+            $"/api/brands/{brandA.Id}/stores",
+            new CreateStoreRequest(brandA.Id, Code("store"), "Store", "UTC"));
+
+        await Host.Scenario(_ =>
+        {
+            AsSuperAdmin(_);
+            _.Get.Url($"/api/brands/{brandB.Id}/org-nodes/{store.Id}");
+            _.StatusCodeShouldBe(HttpStatusCode.NotFound);
+        });
+    }
+
+    [Fact]
+    public async Task invalid_parent_type_rejected()
+    {
+        var brand = await PostAsSuperAdmin<CreateBrandRequest, OrgNodeResponse>(
+            "/api/platform/brands",
+            new CreateBrandRequest(Code(), "Brand"));
+
+        await Host.Scenario(_ =>
+        {
+            AsSuperAdmin(_);
+            _.Post.Json(new CreateDeviceRequest(brand.Id, "SN-001", "Device", DeviceType.Kiosk), JsonStyle.MinimalApi).ToUrl($"/api/brands/{brand.Id}/devices");
+            _.StatusCodeShouldBe(HttpStatusCode.BadRequest);
+        });
+    }
+
+    [Fact]
+    public async Task parent_not_found_rejected()
+    {
+        var brand = await PostAsSuperAdmin<CreateBrandRequest, OrgNodeResponse>(
+            "/api/platform/brands",
+            new CreateBrandRequest(Code(), "Brand"));
+
+        var fakeId = $"store_{Guid.CreateVersion7()}";
+
+        await Host.Scenario(_ =>
+        {
+            AsSuperAdmin(_);
+            _.Post.Json(new CreateStoreRequest(fakeId, Code("store"), "Store", "UTC"), JsonStyle.MinimalApi).ToUrl($"/api/brands/{brand.Id}/stores");
+            _.StatusCodeShouldBe(HttpStatusCode.BadRequest);
+        });
+    }
+
+    // ── Entity Retrieval ──
+
+    [Fact]
+    public async Task get_org_node_by_id()
+    {
+        var brand = await PostAsSuperAdmin<CreateBrandRequest, OrgNodeResponse>(
+            "/api/platform/brands",
+            new CreateBrandRequest(Code(), "Brand"));
+
+        var store = await PostAsSuperAdmin<CreateStoreRequest, OrgNodeResponse>(
+            $"/api/brands/{brand.Id}/stores",
+            new CreateStoreRequest(brand.Id, Code("store"), "Store", "UTC"));
+
+        var result = await Host.Scenario(_ =>
+        {
+            AsSuperAdmin(_);
+            _.Get.Url($"/api/brands/{brand.Id}/org-nodes/{store.Id}");
+        });
+
+        Assert.Equal(200, result.Context.Response.StatusCode);
+        var node = await result.ReadAsJsonAsync<OrgNodeResponse>();
+        Assert.Equal(store.Id, node!.Id);
+    }
+
+    [Fact]
+    public async Task get_org_node_not_found()
+    {
+        var brand = await PostAsSuperAdmin<CreateBrandRequest, OrgNodeResponse>(
+            "/api/platform/brands",
+            new CreateBrandRequest(Code(), "Brand"));
+
+        var fakeId = $"store_{Guid.CreateVersion7()}";
+
+        await Host.Scenario(_ =>
+        {
+            AsSuperAdmin(_);
+            _.Get.Url($"/api/brands/{brand.Id}/org-nodes/{fakeId}");
+            _.StatusCodeShouldBe(HttpStatusCode.NotFound);
+        });
+    }
+
+    [Fact]
+    public async Task get_org_node_wrong_tenant()
+    {
+        var brandA = await PostAsSuperAdmin<CreateBrandRequest, OrgNodeResponse>(
+            "/api/platform/brands",
+            new CreateBrandRequest(Code(), "Brand A"));
+
+        var brandB = await PostAsSuperAdmin<CreateBrandRequest, OrgNodeResponse>(
+            "/api/platform/brands",
+            new CreateBrandRequest(Code(), "Brand B"));
+
+        var store = await PostAsSuperAdmin<CreateStoreRequest, OrgNodeResponse>(
+            $"/api/brands/{brandA.Id}/stores",
+            new CreateStoreRequest(brandA.Id, Code("store"), "Store", "UTC"));
+
+        await Host.Scenario(_ =>
+        {
+            AsSuperAdmin(_);
+            _.Get.Url($"/api/brands/{brandB.Id}/org-nodes/{store.Id}");
+            _.StatusCodeShouldBe(HttpStatusCode.NotFound);
+        });
+    }
+
+    // ── Grant Lifecycle ──
+
+    [Fact]
+    public async Task grant_role_escalation_from_member_to_admin()
+    {
+        var brand = await PostAsSuperAdmin<CreateBrandRequest, OrgNodeResponse>(
+            "/api/platform/brands",
+            new CreateBrandRequest(Code(), "Brand"));
+
+        var subject = await PostAsSuperAdmin<CreateSubjectRequest, SubjectResponse>(
+            "/api/platform/subjects",
+            new CreateSubjectRequest("user@example.com", "User", "test", "default", "escalate-idp"));
+
+        var grant = await PostAsSuperAdmin<GrantRoleRequest, GrantResponse>(
+            $"/api/brands/{brand.Id}/access-grants",
+            new GrantRoleRequest(brand.Id, subject.Id, OrgRole.Member, null));
+        Assert.Equal(OrgRole.Member, grant.Role);
+
+        var escalated = await PostAsSuperAdmin<GrantRoleRequest, GrantResponse>(
+            $"/api/brands/{brand.Id}/access-grants",
+            new GrantRoleRequest(brand.Id, subject.Id, OrgRole.Admin, null));
+        Assert.Equal(OrgRole.Admin, escalated.Role);
+    }
+
+    [Fact]
+    public async Task grant_rejected_for_inactive_subject()
+    {
+        var brand = await PostAsSuperAdmin<CreateBrandRequest, OrgNodeResponse>(
+            "/api/platform/brands",
+            new CreateBrandRequest(Code(), "Brand"));
+
+        var fakeSubjectId = $"subj_{Guid.CreateVersion7()}";
+
+        await Host.Scenario(_ =>
+        {
+            AsSuperAdmin(_);
+            _.Post.Json(new GrantRoleRequest(brand.Id, fakeSubjectId, OrgRole.Member, null), JsonStyle.MinimalApi).ToUrl($"/api/brands/{brand.Id}/access-grants");
+            _.StatusCodeShouldBe(HttpStatusCode.BadRequest);
+        });
+    }
+
+    // ── FluentValidation ──
+
+    [Fact]
+    public async Task create_brand_empty_code_rejected()
+    {
+        await Host.Scenario(_ =>
+        {
+            AsSuperAdmin(_);
+            _.Post.Json(new CreateBrandRequest("", "A Brand"), JsonStyle.MinimalApi).ToUrl("/api/platform/brands");
+            _.StatusCodeShouldBe(HttpStatusCode.BadRequest);
+        });
+    }
+
+    [Fact]
+    public async Task create_brand_empty_name_rejected()
+    {
+        await Host.Scenario(_ =>
+        {
+            AsSuperAdmin(_);
+            _.Post.Json(new CreateBrandRequest(Code(), ""), JsonStyle.MinimalApi).ToUrl("/api/platform/brands");
+            _.StatusCodeShouldBe(HttpStatusCode.BadRequest);
+        });
+    }
+
+    [Fact]
+    public async Task create_subject_invalid_email_rejected()
+    {
+        await Host.Scenario(_ =>
+        {
+            AsSuperAdmin(_);
+            _.Post.Json(new CreateSubjectRequest("not-an-email", "User", "test", "default", "some-id"), JsonStyle.MinimalApi).ToUrl("/api/platform/subjects");
+            _.StatusCodeShouldBe(HttpStatusCode.BadRequest);
+        });
+    }
+
+    [Fact]
+    public async Task create_country_invalid_code_format_rejected()
+    {
+        var brand = await PostAsSuperAdmin<CreateBrandRequest, OrgNodeResponse>(
+            "/api/platform/brands",
+            new CreateBrandRequest(Code(), "Brand"));
+
+        await Host.Scenario(_ =>
+        {
+            AsSuperAdmin(_);
+            _.Post.Json(new CreatePlainOrgNodeRequest(brand.Id, "usa", "United States"), JsonStyle.MinimalApi).ToUrl($"/api/brands/{brand.Id}/countries");
+            _.StatusCodeShouldBe(HttpStatusCode.BadRequest);
+        });
+    }
+
+    [Fact]
+    public async Task create_country_with_valid_alpha2_code()
+    {
+        var brand = await PostAsSuperAdmin<CreateBrandRequest, OrgNodeResponse>(
+            "/api/platform/brands",
+            new CreateBrandRequest(Code(), "Brand"));
+
+        var country = await PostAsSuperAdmin<CreatePlainOrgNodeRequest, OrgNodeResponse>(
+            $"/api/brands/{brand.Id}/countries",
+            new CreatePlainOrgNodeRequest(brand.Id, "PT", "Portugal"));
+
+        Assert.Equal(OrgNodeType.Country, country.Type);
+    }
+
+    [Fact]
+    public async Task superadmin_can_create_franchise()
+    {
+        var brand = await PostAsSuperAdmin<CreateBrandRequest, OrgNodeResponse>(
+            "/api/platform/brands",
+            new CreateBrandRequest(Code(), "Brand"));
+
+        var franchise = await PostAsSuperAdmin<CreatePlainOrgNodeRequest, OrgNodeResponse>(
+            $"/api/brands/{brand.Id}/franchises",
+            new CreatePlainOrgNodeRequest(brand.Id, Code("fr"), "Lisbon Franchise"));
+
+        Assert.Equal(OrgNodeType.Franchise, franchise.Type);
+        Assert.Equal(brand.Id, franchise.ParentId);
+    }
+
+    [Fact]
+    public async Task superadmin_can_create_subject()
+    {
+        var subject = await PostAsSuperAdmin<CreateSubjectRequest, SubjectResponse>(
+            "/api/platform/subjects",
+            new CreateSubjectRequest("test@example.com", "Test User", "test", "default", "test-idp"));
+
+        Assert.StartsWith("subj_", subject.Id, StringComparison.Ordinal);
+        Assert.Equal("test@example.com", subject.Email);
+        Assert.Equal("Test User", subject.DisplayName);
+    }
+
+    [Fact]
+    public async Task create_device_invalid_serial_rejected()
+    {
+        var brand = await PostAsSuperAdmin<CreateBrandRequest, OrgNodeResponse>(
+            "/api/platform/brands",
+            new CreateBrandRequest(Code(), "Brand"));
+
+        var store = await PostAsSuperAdmin<CreateStoreRequest, OrgNodeResponse>(
+            $"/api/brands/{brand.Id}/stores",
+            new CreateStoreRequest(brand.Id, Code("store"), "Store", "UTC"));
+
+        await Host.Scenario(_ =>
+        {
+            AsSuperAdmin(_);
+            _.Post.Json(new CreateDeviceRequest(store.Id, "", "Device", DeviceType.Kiosk), JsonStyle.MinimalApi).ToUrl($"/api/brands/{brand.Id}/devices");
+            _.StatusCodeShouldBe(HttpStatusCode.BadRequest);
+        });
+    }
+
+    [Fact]
+    public async Task create_device_requires_store_parent()
+    {
+        var brand = await PostAsSuperAdmin<CreateBrandRequest, OrgNodeResponse>(
+            "/api/platform/brands",
+            new CreateBrandRequest(Code(), "Brand"));
+
+        await Host.Scenario(_ =>
+        {
+            AsSuperAdmin(_);
+            _.Post.Json(new CreateDeviceRequest(brand.Id, "SN-001", "Device", DeviceType.Kiosk), JsonStyle.MinimalApi).ToUrl($"/api/brands/{brand.Id}/devices");
+            _.StatusCodeShouldBe(HttpStatusCode.BadRequest);
+        });
+    }
+
+    // ── Helpers ──
+
     private async Task<TResponse> PostAsSuperAdmin<TRequest, TResponse>(string url, TRequest request)
     {
         var result = await Host.Scenario(_ =>
@@ -103,6 +502,18 @@ public class OrgHierarchyTests(ApiFixture fixture) : ContractTestWithAlba(fixtur
         scenario.WithRequestHeader("X-Test-User", "superadmin-idp");
         scenario.WithRequestHeader("X-Test-Email", "superadmin@example.com");
         scenario.WithRequestHeader("X-Test-Roles", "critcrit.superadmin");
+    }
+
+    private static void AsPlainUser(Scenario scenario, string externalId)
+    {
+        scenario.WithRequestHeader("X-Test-User", externalId);
+        scenario.WithRequestHeader("X-Test-Email", $"{externalId}@example.com");
+    }
+
+    private static void AsUser(Scenario scenario, string externalId, string email)
+    {
+        scenario.WithRequestHeader("X-Test-User", externalId);
+        scenario.WithRequestHeader("X-Test-Email", email);
     }
 
     private static string Code(string prefix = "brand") => $"{prefix}-{Guid.NewGuid():N}"[..32];

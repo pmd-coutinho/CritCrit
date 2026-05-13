@@ -1,14 +1,16 @@
 using JasperFx;
 using JasperFx.Core;
 using JasperFx.Events;
+using JasperFx.Events.Projections;
 using Marten;
 using System.Security.Claims;
 using System.Text.Json;
 using CritCrit.Api.Org.Auth;
 using CritCrit.Api.Org.Domain;
 using CritCrit.Api.Org.Infrastructure;
+using CritCrit.Api.Org.Projections;
+using Marten.Storage;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
-using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.OpenApi;
 using Scalar.AspNetCore;
 using Wolverine;
@@ -100,9 +102,17 @@ builder.Services.AddMarten(m =>
 
     // This is just annoying anyway
     m.DisableNpgsqlLogging = true;
+    
+    m.Projections.Add<OrgNodeProjection>(ProjectionLifecycle.Inline);
+    m.Projections.Add<OrgNodeCodeIndexProjection>(ProjectionLifecycle.Inline);
+    m.Projections.Add<StoreProfileProjection>(ProjectionLifecycle.Inline);
+    m.Projections.Add<DeviceProfileProjection>(ProjectionLifecycle.Inline);
+    m.Projections.Add<SubjectProjection>(ProjectionLifecycle.Inline);
+    m.Projections.Add<ExternalIdentityProjection>(ProjectionLifecycle.Inline);
+    m.Projections.Add<GrantProjection>(ProjectionLifecycle.Inline);
 })
  .ApplyAllDatabaseChangesOnStartup()
-// This will remove some runtime overhead from Marten
+ // This will remove some runtime overhead from Marten
 .UseLightweightSessions()
 
 .IntegrateWithWolverine(x =>
@@ -224,7 +234,7 @@ app.UseHttpsRedirection();
 app.MapDefaultEndpoints();
 app.UseAuthentication();
 app.UseAuthorization();
-app.UseMiddleware<OrgApiMiddleware>();
+app.UseMiddleware<DomainExceptionMiddleware>();
 app.UseMiddleware<BrandTenantMiddleware>();
 
 app.MapWolverineEndpoints(c =>
@@ -233,6 +243,7 @@ app.MapWolverineEndpoints(c =>
     c.ServiceProviderSource = ServiceProviderSource.FromHttpContextRequestServices;
     c.SourceServiceFromHttpContext<IDocumentStore>();
     c.SourceServiceFromHttpContext<OrgCommandService>();
+    c.AddPolicy<OrgHttpPolicy>();
 });
 
 return await app.RunJasperFxCommands(args);

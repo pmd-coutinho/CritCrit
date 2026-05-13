@@ -75,6 +75,7 @@ public sealed class ExternalIdentityReadModel
 public sealed class OrgAccessGrantReadModel
 {
     public string Id { get; set; } = "";
+    public Guid StreamId { get; set; }
     public Guid TenantId { get; set; }
     public Guid OrgNodeId { get; set; }
     public Guid SubjectId { get; set; }

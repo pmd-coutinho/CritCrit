@@ -1,0 +1,21 @@
+using CritCrit.Api.Org.Domain;
+using Marten;
+using Marten.Events;
+using Marten.Events.Projections;
+
+namespace CritCrit.Api.Org.Projections;
+
+public sealed class ExternalIdentityProjection : EventProjection
+{
+    public void Project(ExternalIdentityLinked e, IDocumentOperations ops)
+    {
+        ops.Store(new ExternalIdentityReadModel
+        {
+            Id = ExternalIdentityReadModel.BuildId(e.Provider, e.ProviderTenant, e.ExternalId),
+            SubjectId = e.SubjectId.Value,
+            Provider = e.Provider,
+            ProviderTenant = e.ProviderTenant,
+            ExternalId = e.ExternalId
+        });
+    }
+}
