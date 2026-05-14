@@ -10,7 +10,7 @@ namespace CritCrit.Api.Org.Handlers;
 public static class OrgNodeHandlers
 {
     [WolverinePost("/api/brands/{brandId}/countries")]
-    public static async Task<OrgNodeResponse> CreateCountry(
+    public static async Task<IResult> CreateCountry(
         CreatePlainOrgNodeRequest request,
         string brandId,
         IDocumentStore store,
@@ -37,11 +37,12 @@ public static class OrgNodeHandlers
         await session.SaveChangesAsync(ct);
         var node = await session.LoadAsync<OrgNodeReadModel>(id.Value, ct)
             ?? throw new InvalidOperationException("Projection failed to create OrgNodeReadModel.");
-        return BrandHandlers.ToResponse(node);
+        var publicId = OrgPublicId.Format(OrgNodeType.Country, id);
+        return Results.Created($"/api/brands/{brandId}/org-nodes/{publicId}", BrandHandlers.ToResponse(node));
     }
 
     [WolverinePost("/api/brands/{brandId}/franchises")]
-    public static async Task<OrgNodeResponse> CreateFranchise(
+    public static async Task<IResult> CreateFranchise(
         CreatePlainOrgNodeRequest request,
         string brandId,
         IDocumentStore store,
@@ -68,11 +69,12 @@ public static class OrgNodeHandlers
         await session.SaveChangesAsync(ct);
         var node = await session.LoadAsync<OrgNodeReadModel>(id.Value, ct)
             ?? throw new InvalidOperationException("Projection failed to create OrgNodeReadModel.");
-        return BrandHandlers.ToResponse(node);
+        var publicId = OrgPublicId.Format(OrgNodeType.Franchise, id);
+        return Results.Created($"/api/brands/{brandId}/org-nodes/{publicId}", BrandHandlers.ToResponse(node));
     }
 
     [WolverinePost("/api/brands/{brandId}/stores")]
-    public static async Task<OrgNodeResponse> CreateStore(
+    public static async Task<IResult> CreateStore(
         CreateStoreRequest request,
         string brandId,
         IDocumentStore store,
@@ -102,11 +104,12 @@ public static class OrgNodeHandlers
         await session.SaveChangesAsync(ct);
         var node = await session.LoadAsync<OrgNodeReadModel>(id.Value, ct)
             ?? throw new InvalidOperationException("Projection failed to create OrgNodeReadModel.");
-        return BrandHandlers.ToResponse(node);
+        var publicId = OrgPublicId.Format(OrgNodeType.Store, id);
+        return Results.Created($"/api/brands/{brandId}/org-nodes/{publicId}", BrandHandlers.ToResponse(node));
     }
 
     [WolverinePost("/api/brands/{brandId}/devices")]
-    public static async Task<OrgNodeResponse> CreateDevice(
+    public static async Task<IResult> CreateDevice(
         CreateDeviceRequest request,
         string brandId,
         IDocumentStore store,
@@ -135,7 +138,8 @@ public static class OrgNodeHandlers
         await session.SaveChangesAsync(ct);
         var node = await session.LoadAsync<OrgNodeReadModel>(id.Value, ct)
             ?? throw new InvalidOperationException("Projection failed to create OrgNodeReadModel.");
-        return BrandHandlers.ToResponse(node);
+        var publicId = OrgPublicId.Format(OrgNodeType.Device, id);
+        return Results.Created($"/api/brands/{brandId}/org-nodes/{publicId}", BrandHandlers.ToResponse(node));
     }
 
     // ── Lifecycle ──

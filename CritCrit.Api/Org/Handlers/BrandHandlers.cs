@@ -9,7 +9,7 @@ namespace CritCrit.Api.Org.Handlers;
 public static class BrandHandlers
 {
     [WolverinePost("/api/platform/brands")]
-    public static async Task<OrgNodeResponse> CreateBrand(
+    public static async Task<IResult> CreateBrand(
         CreateBrandRequest request,
         IDocumentStore store,
         OrgAuthorizationService authorization,
@@ -31,7 +31,8 @@ public static class BrandHandlers
         await session.SaveChangesAsync(ct);
         var node = await session.LoadAsync<OrgNodeReadModel>(id.Value, ct)
             ?? throw new InvalidOperationException("Projection failed to create OrgNodeReadModel.");
-        return ToResponse(node);
+        var publicId = OrgPublicId.Format(OrgNodeType.Brand, id);
+        return Results.Created($"/api/brands/{publicId}/org-nodes/{publicId}", ToResponse(node));
     }
 
     [WolverineGet("/api/brands/{brandId}/org-nodes/{nodeId}")]

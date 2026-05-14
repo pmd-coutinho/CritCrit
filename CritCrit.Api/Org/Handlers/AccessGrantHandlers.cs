@@ -1,4 +1,3 @@
-using CritCrit.Api.Org.Auth;
 using CritCrit.Api.Org.Domain;
 using CritCrit.Api.Org.Endpoints;
 using CritCrit.Api.Org.Infrastructure;
@@ -10,7 +9,7 @@ namespace CritCrit.Api.Org.Handlers;
 public static class AccessGrantHandlers
 {
     [WolverinePost("/api/brands/{brandId}/access-grants")]
-    public static async Task<GrantResponse> GrantRole(
+    public static async Task<IResult> GrantRole(
         GrantRoleRequest request,
         string brandId,
         IDocumentStore store,
@@ -57,7 +56,8 @@ public static class AccessGrantHandlers
             session.Events.Append(grant.StreamId, new OrgAccessRoleChanged(tenant.TenantId, nodeId, subjectId, grant.Role, request.Role));
             await session.SaveChangesAsync(ct);
             var updated = await session.LoadAsync<OrgAccessGrantReadModel>(id, ct);
-            return new GrantResponse(updated!.Id, request.OrgNodeId, request.SubjectId, updated.Role, updated.ExpiresAt);
+            return Results.Created($"/api/brands/{brandId}/access-grants/{id}",
+                new GrantResponse(updated!.Id, request.OrgNodeId, request.SubjectId, updated.Role, updated.ExpiresAt));
         }
 
         var streamId = Guid.CreateVersion7();
@@ -65,6 +65,7 @@ public static class AccessGrantHandlers
         await session.SaveChangesAsync(ct);
         var created = await session.LoadAsync<OrgAccessGrantReadModel>(id, ct)
             ?? throw new InvalidOperationException("Projection failed to create OrgAccessGrantReadModel.");
-        return new GrantResponse(created.Id, request.OrgNodeId, request.SubjectId, created.Role, created.ExpiresAt);
+        return Results.Created($"/api/brands/{brandId}/access-grants/{id}",
+            new GrantResponse(created.Id, request.OrgNodeId, request.SubjectId, created.Role, created.ExpiresAt));
     }
 }

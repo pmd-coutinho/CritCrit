@@ -1,4 +1,5 @@
 using System.Net;
+using System.Text.Json;
 using Alba;
 using CritCrit.Api.Org.Domain;
 using CritCrit.Api.Org.Endpoints;
@@ -486,7 +487,7 @@ public class OrgHierarchyTests(ApiFixture fixture) : ContractTestWithAlba(fixtur
         var (brand, store) = await CreateBrandAndStore();
         var result = await PostAsSuperAdmin<ArchiveOrgNodeRequest, OrgNodeResponse>(
             $"/api/brands/{brand.Id}/org-nodes/{store.Id}/archive",
-            new ArchiveOrgNodeRequest(false, "seasonal closure"));
+            new ArchiveOrgNodeRequest(false, "seasonal closure"), HttpStatusCode.OK);
         Assert.True(result.Archived);
     }
 
@@ -502,7 +503,7 @@ public class OrgHierarchyTests(ApiFixture fixture) : ContractTestWithAlba(fixtur
 
         await PostAsSuperAdmin<ArchiveOrgNodeRequest, OrgNodeResponse>(
             $"/api/brands/{brand.Id}/org-nodes/{store.Id}/archive",
-            new ArchiveOrgNodeRequest(true, "force cascade"));
+            new ArchiveOrgNodeRequest(true, "force cascade"), HttpStatusCode.OK);
 
         // Verify device is effectively archived
         var deviceAfter = await GetNode(brand.Id, device.Id);
@@ -534,7 +535,7 @@ public class OrgHierarchyTests(ApiFixture fixture) : ContractTestWithAlba(fixtur
         var (brand, store) = await CreateBrandAndStore();
         await PostAsSuperAdmin<ArchiveOrgNodeRequest, OrgNodeResponse>(
             $"/api/brands/{brand.Id}/org-nodes/{store.Id}/archive",
-            new ArchiveOrgNodeRequest(false, null));
+            new ArchiveOrgNodeRequest(false, null), HttpStatusCode.OK);
 
         await Host.Scenario(_ =>
         {
@@ -567,7 +568,7 @@ public class OrgHierarchyTests(ApiFixture fixture) : ContractTestWithAlba(fixtur
         var (brand, store) = await CreateBrandAndStore();
         await PostAsSuperAdmin<ArchiveOrgNodeRequest, OrgNodeResponse>(
             $"/api/brands/{brand.Id}/org-nodes/{store.Id}/archive",
-            new ArchiveOrgNodeRequest(false, null));
+            new ArchiveOrgNodeRequest(false, null), HttpStatusCode.OK);
 
         await Host.Scenario(_ =>
         {
@@ -677,7 +678,7 @@ public class OrgHierarchyTests(ApiFixture fixture) : ContractTestWithAlba(fixtur
 
         var moved = await PostAsSuperAdmin<MoveOrgNodeRequest, OrgNodeResponse>(
             $"/api/brands/{brand.Id}/org-nodes/{store.Id}/move",
-            new MoveOrgNodeRequest(country.Id, "reorg"));
+            new MoveOrgNodeRequest(country.Id, "reorg"), HttpStatusCode.OK);
 
         Assert.Equal(country.Id, moved.ParentId);
     }
@@ -748,7 +749,7 @@ public class OrgHierarchyTests(ApiFixture fixture) : ContractTestWithAlba(fixtur
 
         await PostAsSuperAdmin<MoveOrgNodeRequest, OrgNodeResponse>(
             $"/api/brands/{brand.Id}/org-nodes/{store.Id}/move",
-            new MoveOrgNodeRequest(country.Id, "reorg"));
+            new MoveOrgNodeRequest(country.Id, "reorg"), HttpStatusCode.OK);
 
         // Verify device path updated
         var deviceAfter = await GetNode(brand.Id, device.Id);
@@ -845,19 +846,21 @@ public class OrgHierarchyTests(ApiFixture fixture) : ContractTestWithAlba(fixtur
 
     private async Task<TResponse> PostAsSuperAdmin<TRequest, TResponse>(string url, TRequest request)
     {
+        return await PostAsSuperAdmin<TRequest, TResponse>(url, request, HttpStatusCode.Created);
+    }
+
+    private async Task<TResponse> PostAsSuperAdmin<TRequest, TResponse>(string url, TRequest request, HttpStatusCode expectedStatus)
+    {
         var result = await Host.Scenario(_ =>
         {
             AsSuperAdmin(_);
             _.Post.Json(request!, JsonStyle.MinimalApi).ToUrl(url);
+            _.StatusCodeShouldBe(expectedStatus);
         });
-        if (result.Context.Response.StatusCode != 200)
-        {
-            using var reader = new StreamReader(result.Context.Response.Body);
-            var body = await reader.ReadToEndAsync();
-            throw new Xunit.Sdk.XunitException($"Expected 200 but got {result.Context.Response.StatusCode}: {body}");
-        }
 
-        return (await result.ReadAsJsonAsync<TResponse>())!;
+        var body = await result.ReadAsTextAsync();
+        return JsonSerializer.Deserialize<TResponse>(body,
+            new JsonSerializerOptions { PropertyNameCaseInsensitive = true })!;
     }
 
     private static void AsSuperAdmin(Scenario scenario)

@@ -9,7 +9,7 @@ namespace CritCrit.Api.Org.Handlers;
 public static class SubjectHandlers
 {
     [WolverinePost("/api/platform/subjects")]
-    public static async Task<SubjectResponse> CreateSubject(
+    public static async Task<IResult> CreateSubject(
         CreateSubjectRequest request,
         IDocumentStore store,
         OrgAuthorizationService authorization,
@@ -30,6 +30,8 @@ public static class SubjectHandlers
         await session.SaveChangesAsync(ct);
         var subject = await session.LoadAsync<SubjectReadModel>(id.Value, ct)
             ?? throw new InvalidOperationException("Projection failed to create SubjectReadModel.");
-        return new SubjectResponse(subject.PublicId, subject.Email, subject.DisplayName);
+        var publicId = OrgPublicId.FormatSubject(id);
+        return Results.Created($"/api/platform/subjects/{publicId}",
+            new SubjectResponse(subject.PublicId, subject.Email, subject.DisplayName));
     }
 }
