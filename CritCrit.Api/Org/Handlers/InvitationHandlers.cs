@@ -33,8 +33,8 @@ public static class InvitationHandlers
         var existingSubject = await platformSession.Query<SubjectReadModel>()
             .Where(x => x.EmailNormalized == normalizedEmail)
             .SingleOrDefaultAsync(ct);
-        if (existingSubject is { OnboardedAt: not null })
-            throw new DomainException("This user is already onboarded. Use direct grants instead.");
+        if (existingSubject is { Active: false })
+            throw new DomainException("This subject is deactivated. Reactivate them before re-inviting.");
 
         var activeInvitation = await platformSession.Query<InvitationReadModel>()
             .Where(x =>

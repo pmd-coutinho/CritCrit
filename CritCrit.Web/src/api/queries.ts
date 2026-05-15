@@ -18,6 +18,11 @@ import type {
   OrgNodeResponse,
   OrgTreeNodeResponse,
   RevokeOwnerRequest,
+  RevokeGrantRequest,
+  SetGrantExpirationRequest,
+  DeactivateSubjectRequest,
+  ReactivateSubjectRequest,
+  RelinkSubjectIdentityRequest,
   SubjectResponse,
 } from "./generated";
 
@@ -322,6 +327,76 @@ export function useRevokeOwner(brandId: MaybeRefOrGetter<string>) {
       return res.response.ok ? null : (() => { throw res.error ?? new Error("Revoke failed"); })();
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: keys.grants(toValue(brandId)) }),
+  });
+}
+
+export function useRevokeGrant(brandId: MaybeRefOrGetter<string>) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (body: RevokeGrantRequest) => {
+      const res = await api.POST("/api/brands/{brandId}/access-grants/revoke", {
+        params: { path: { brandId: toValue(brandId) } },
+        body,
+      });
+      if (!res.response.ok) throw (res as { error?: unknown }).error ?? new Error("Request failed");
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: keys.grants(toValue(brandId)) }),
+  });
+}
+
+export function useSetGrantExpiration(brandId: MaybeRefOrGetter<string>) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (body: SetGrantExpirationRequest) => {
+      const res = await api.POST("/api/brands/{brandId}/access-grants/expiration", {
+        params: { path: { brandId: toValue(brandId) } },
+        body,
+      });
+      return unwrap(res);
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: keys.grants(toValue(brandId)) }),
+  });
+}
+
+export function useDeactivateSubject() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ subjectId, body }: { subjectId: string; body: DeactivateSubjectRequest }) => {
+      const res = await api.POST("/api/platform/subjects/{subjectId}/deactivate", {
+        params: { path: { subjectId } },
+        body,
+      });
+      if (!res.response.ok) throw (res as { error?: unknown }).error ?? new Error("Request failed");
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["subjects"] }),
+  });
+}
+
+export function useReactivateSubject() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ subjectId, body }: { subjectId: string; body: ReactivateSubjectRequest }) => {
+      const res = await api.POST("/api/platform/subjects/{subjectId}/reactivate", {
+        params: { path: { subjectId } },
+        body,
+      });
+      if (!res.response.ok) throw (res as { error?: unknown }).error ?? new Error("Request failed");
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["subjects"] }),
+  });
+}
+
+export function useRelinkSubject() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ subjectId, body }: { subjectId: string; body: RelinkSubjectIdentityRequest }) => {
+      const res = await api.POST("/api/platform/subjects/{subjectId}/relink", {
+        params: { path: { subjectId } },
+        body,
+      });
+      if (!res.response.ok) throw (res as { error?: unknown }).error ?? new Error("Request failed");
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["subjects"] }),
   });
 }
 

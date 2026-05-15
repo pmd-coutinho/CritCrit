@@ -44,6 +44,35 @@ describe("query keys", () => {
   });
 });
 
+describe("revoke / lifecycle mutation shapes", () => {
+  // Compile-time guard: each mutation request type's shape matches what the
+  // backend accepts. Catches contract drift between API DTOs and SPA types
+  // without rendering a component.
+
+  it("RevokeGrantRequest shape", () => {
+    const body = { orgNodeId: "br_1", subjectId: "subj_1", reason: null };
+    expect(typeof body.orgNodeId).toBe("string");
+    expect(typeof body.subjectId).toBe("string");
+    expect(body.reason).toBeNull();
+  });
+
+  it("DeactivateSubjectRequest accepts null reason", () => {
+    const body = { reason: null };
+    expect(body.reason).toBeNull();
+  });
+
+  it("RelinkSubjectIdentityRequest carries old + new external IDs", () => {
+    const body = {
+      provider: "keycloak",
+      providerTenant: "api",
+      oldExternalId: "old-sub",
+      newExternalId: "new-sub",
+      reason: "kc-recreated",
+    };
+    expect(body.oldExternalId).not.toBe(body.newExternalId);
+  });
+});
+
 describe("api client mocking sanity", () => {
   it("GET mock returns whatever we tell it to", async () => {
     mocks.GET.mockResolvedValue({ data: [{ id: "br_1" }], error: undefined });

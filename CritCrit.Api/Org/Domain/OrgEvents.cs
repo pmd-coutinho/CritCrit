@@ -49,6 +49,24 @@ public sealed record ExternalIdentityLinked(
     string ProviderTenant,
     string ExternalId);
 
+public sealed record ExternalIdentityRelinked(
+    SubjectId SubjectId,
+    string Provider,
+    string ProviderTenant,
+    string OldExternalId,
+    string NewExternalId,
+    string? Reason);
+
+public sealed record SubjectDeactivated(
+    SubjectId Id,
+    string? Reason,
+    DateTimeOffset DeactivatedAt);
+
+public sealed record SubjectReactivated(
+    SubjectId Id,
+    string? Reason,
+    DateTimeOffset ReactivatedAt);
+
 public sealed record OrgAccessGranted(
     OrgNodeId TenantId,
     OrgNodeId OrgNodeId,

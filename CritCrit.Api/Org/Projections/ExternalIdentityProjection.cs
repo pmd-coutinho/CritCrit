@@ -18,4 +18,21 @@ public sealed class ExternalIdentityProjection : EventProjection
             ExternalId = e.ExternalId
         });
     }
+
+    public void Project(ExternalIdentityRelinked e, IDocumentOperations ops)
+    {
+        // Drop the old link so authentication via the previous Keycloak user
+        // no longer resolves to this subject, then write the fresh one.
+        ops.Delete<ExternalIdentityReadModel>(
+            ExternalIdentityReadModel.BuildId(e.Provider, e.ProviderTenant, e.OldExternalId));
+
+        ops.Store(new ExternalIdentityReadModel
+        {
+            Id = ExternalIdentityReadModel.BuildId(e.Provider, e.ProviderTenant, e.NewExternalId),
+            SubjectId = e.SubjectId.Value,
+            Provider = e.Provider,
+            ProviderTenant = e.ProviderTenant,
+            ExternalId = e.NewExternalId
+        });
+    }
 }

@@ -60,8 +60,8 @@ public sealed class InvitationWorkflow(
             }
 
             var subject = existingSubject ?? await session.LoadAsync<SubjectReadModel>(subjectId.Value, ct);
-            if (subject is not null && subject.OnboardedAt is not null)
-                throw new DomainException("This user is already onboarded. Use direct grants instead.");
+            if (subject is { Active: false })
+                throw new DomainException("This subject is deactivated. Reactivate them before re-inviting.");
 
             if (existingLink is null)
             {

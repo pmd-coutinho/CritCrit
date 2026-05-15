@@ -49,7 +49,8 @@ public enum OrgAccessRevokedReason
     UserRequested,
     RedundantByAncestorGrant,
     TargetHardDeleted,
-    SubjectDisabled
+    SubjectDisabled,
+    SubjectDeactivated
 }
 
 public enum InvitationStatus

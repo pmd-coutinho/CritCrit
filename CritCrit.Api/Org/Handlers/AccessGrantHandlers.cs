@@ -134,6 +134,72 @@ public static class AccessGrantHandlers
             new GrantResponse(created.Id, request.OrgNodeId, request.SubjectId, created.Role, created.ExpiresAt));
     }
 
+    [WolverinePost("/api/brands/{brandId}/access-grants/revoke")]
+    [EmptyResponse]
+    public static async Task RevokeGrant(
+        RevokeGrantRequest request,
+        string brandId,
+        IDocumentStore store,
+        OrgAuthorizationService authorization,
+        BrandTenantContext tenant,
+        ActorContext actor,
+        CancellationToken ct)
+    {
+        await using var session = SessionFactory.TenantSession(store, tenant);
+        SessionMetadata.StampActor(session, actor);
+
+        if (!OrgPublicId.TryParseOrgNode(request.OrgNodeId, out var nodeId, out _))
+            throw new DomainException("Invalid org node ID.");
+        if (!OrgPublicId.TryParseSubject(request.SubjectId, out var subjectId))
+            throw new DomainException("Invalid subject ID.");
+
+        var target = await OrgValidation.LoadNodeAsync(session, nodeId, ct);
+        if (target.TenantId != tenant.TenantId.Value)
+            throw new DomainException("Org node does not belong to the requested brand tenant.");
+
+        var grantId = OrgAccessGrantReadModel.BuildId(tenant.TenantId, nodeId, subjectId);
+        var grant = await session.LoadAsync<OrgAccessGrantReadModel>(grantId, ct);
+        if (grant is not { Status: OrgAccessGrantStatus.Active })
+            throw new DomainException("Active grant not found.", 404);
+
+        // Owner grants flow through /owners/{subjectId}/revoke so audit + downgrade
+        // semantics stay together. Refuse to use this endpoint for owners.
+        if (grant.Role == OrgRole.Owner)
+            throw new DomainException("Use /owners/{subjectId}/revoke to revoke an Owner grant.", 400);
+
+        // Role gate: actor must hold a role >= the grant's role at this node
+        // (SuperAdmin bypasses). Prevents a Member-at-node from removing an
+        // Admin-at-node grant even if they technically have any Admin in scope.
+        if (!actor.IsSuperAdmin)
+        {
+            await authorization.EnforceRoleAsync(session, actor, target, OrgRole.Admin, ct);
+
+            if (actor.SubjectId is null)
+                throw new DomainException("Authenticated actor is not provisioned in CritCrit.", 403);
+
+            var effective = await authorization.GetEffectiveRoleAsync(
+                session, target, actor.SubjectId.Value, TimeProvider.System.GetUtcNow(), ct);
+            if (effective is null || effective.Value < grant.Role)
+                throw new DomainException(
+                    $"Your role at this node ({effective?.ToString() ?? "none"}) is below the grant being revoked ({grant.Role}).",
+                    403);
+        }
+
+        var subject = await session.LoadAsync<SubjectReadModel>(subjectId.Value, ct);
+
+        session.Events.Append(grant.StreamId,
+            new OrgAccessRevoked(tenant.TenantId, nodeId, subjectId, OrgAccessRevokedReason.UserRequested));
+
+        AuditLog.Write(session, OrgAuditActions.GrantRevoked, actor, tenant.TenantId.Value, nodeId.Value, request.Reason, new
+        {
+            SubjectId = subject?.PublicId,
+            SubjectEmail = subject?.Email,
+            Role = grant.Role.ToString()
+        });
+
+        await session.SaveChangesAsync(ct);
+    }
+
     [WolverineGet("/api/brands/{brandId}/access-grants")]
     public static async Task<IReadOnlyList<GrantListItem>> ListGrants(
         string brandId,

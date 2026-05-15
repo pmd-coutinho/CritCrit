@@ -436,31 +436,65 @@ public class OrgHierarchyTests : ContractTestWithAlba
     }
 
     [Fact]
-    public async Task inviting_onboarded_subject_is_rejected()
+    public async Task reinviting_an_onboarded_subject_to_a_new_node_is_allowed()
+    {
+        // Onboard the user with an initial Member grant at the brand root.
+        var brand = await PostAsSuperAdmin<CreateBrandRequest, OrgNodeResponse>(
+            "/api/platform/brands",
+            new CreateBrandRequest(Code(), "Brand"));
+
+        var first = await PostAsSuperAdmin<CreateInvitationRequest, InvitationResponse>(
+            $"/api/brands/{brand.Id}/invitations",
+            new CreateInvitationRequest(brand.Id, "returner@example.com", OrgRole.Member),
+            HttpStatusCode.Accepted);
+
+        var providerUser = FindProviderUser("returner@example.com");
+        var firstToken = ExtractToken((await WaitForSentInvitationEmailAsync(first.Id)).Body);
+        await Host.Scenario(_ =>
+        {
+            AsUser(_, providerUser.ExternalId, "returner@example.com");
+            _.Get.Url($"/api/invitations/accept?token={Uri.EscapeDataString(firstToken)}");
+            _.StatusCodeShouldBe(HttpStatusCode.OK);
+        });
+
+        // Now create a country and re-invite the same email there. Should succeed
+        // because the subject is active — onboarded-status no longer blocks it.
+        var country = await PostAsSuperAdmin<CreatePlainOrgNodeRequest, OrgNodeResponse>(
+            $"/api/brands/{brand.Id}/countries",
+            new CreatePlainOrgNodeRequest(brand.Id, "us", "United States"));
+
+        var second = await PostAsSuperAdmin<CreateInvitationRequest, InvitationResponse>(
+            $"/api/brands/{brand.Id}/invitations",
+            new CreateInvitationRequest(country.Id, "returner@example.com", OrgRole.Admin),
+            HttpStatusCode.Accepted);
+
+        await WaitForInvitationAsync(second.Id, InvitationStatus.Pending);
+    }
+
+    [Fact]
+    public async Task inviting_a_deactivated_subject_is_rejected()
     {
         var brand = await PostAsSuperAdmin<CreateBrandRequest, OrgNodeResponse>(
             "/api/platform/brands",
             new CreateBrandRequest(Code(), "Brand"));
 
-        var invitation = await PostAsSuperAdmin<CreateInvitationRequest, InvitationResponse>(
-            $"/api/brands/{brand.Id}/invitations",
-            new CreateInvitationRequest(brand.Id, "onboarded@example.com", OrgRole.Member),
-            HttpStatusCode.Accepted);
-
-        var providerUser = FindProviderUser("onboarded@example.com");
-        var token = ExtractToken((await WaitForSentInvitationEmailAsync(invitation.Id)).Body);
+        // Create and deactivate the subject directly via the platform endpoints.
+        var subject = await PostAsSuperAdmin<CreateSubjectRequest, SubjectResponse>(
+            "/api/platform/subjects",
+            new CreateSubjectRequest("offboarded@example.com", null, "test", "default", "off-ext"));
 
         await Host.Scenario(_ =>
         {
-            AsUser(_, providerUser.ExternalId, "onboarded@example.com");
-            _.Get.Url($"/api/invitations/accept?token={Uri.EscapeDataString(token)}");
-            _.StatusCodeShouldBe(HttpStatusCode.OK);
+            AsSuperAdmin(_);
+            _.Post.Json(new DeactivateSubjectRequest("offboarding"), JsonStyle.MinimalApi)
+                .ToUrl($"/api/platform/subjects/{subject.Id}/deactivate");
+            _.StatusCodeShouldBe(HttpStatusCode.NoContent);
         });
 
         await Host.Scenario(_ =>
         {
             AsSuperAdmin(_);
-            _.Post.Json(new CreateInvitationRequest(brand.Id, "onboarded@example.com", OrgRole.Member), JsonStyle.MinimalApi)
+            _.Post.Json(new CreateInvitationRequest(brand.Id, "offboarded@example.com", OrgRole.Member), JsonStyle.MinimalApi)
                 .ToUrl($"/api/brands/{brand.Id}/invitations");
             _.StatusCodeShouldBe(HttpStatusCode.BadRequest);
         });

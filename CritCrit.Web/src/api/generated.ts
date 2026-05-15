@@ -180,6 +180,28 @@ export interface RevokeOwnerRequest {
   reason: string;
 }
 
+export interface RevokeGrantRequest {
+  orgNodeId: string;
+  subjectId: string;
+  reason: string | null;
+}
+
+export interface DeactivateSubjectRequest {
+  reason: string | null;
+}
+
+export interface ReactivateSubjectRequest {
+  reason: string | null;
+}
+
+export interface RelinkSubjectIdentityRequest {
+  provider: string;
+  providerTenant: string;
+  oldExternalId: string;
+  newExternalId: string;
+  reason: string | null;
+}
+
 export interface CreateSubjectRequest {
   email: string;
   displayName: string | null;
@@ -233,6 +255,34 @@ export interface paths {
       parameters: { path: { brandId: string } };
       requestBody: { content: { "application/json": SetGrantExpirationRequest } };
       responses: { 200: { content: { "application/json": GrantResponse } } };
+    };
+  };
+  "/api/brands/{brandId}/access-grants/revoke": {
+    post: {
+      parameters: { path: { brandId: string } };
+      requestBody: { content: { "application/json": RevokeGrantRequest } };
+      responses: { 204: { content: never } };
+    };
+  };
+  "/api/platform/subjects/{subjectId}/deactivate": {
+    post: {
+      parameters: { path: { subjectId: string } };
+      requestBody: { content: { "application/json": DeactivateSubjectRequest } };
+      responses: { 204: { content: never } };
+    };
+  };
+  "/api/platform/subjects/{subjectId}/reactivate": {
+    post: {
+      parameters: { path: { subjectId: string } };
+      requestBody: { content: { "application/json": ReactivateSubjectRequest } };
+      responses: { 204: { content: never } };
+    };
+  };
+  "/api/platform/subjects/{subjectId}/relink": {
+    post: {
+      parameters: { path: { subjectId: string } };
+      requestBody: { content: { "application/json": RelinkSubjectIdentityRequest } };
+      responses: { 204: { content: never } };
     };
   };
   "/api/brands/{brandId}/owners": {

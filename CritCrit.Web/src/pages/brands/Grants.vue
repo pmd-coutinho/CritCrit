@@ -7,7 +7,9 @@ import {
   useDowngradeOwner,
   useGrantOwner,
   useGrantRole,
+  useRevokeGrant,
   useRevokeOwner,
+  useSetGrantExpiration,
 } from "@/api/queries";
 import type { GrantListItem, OrgRole } from "@/api/generated";
 import { errorMessage } from "@/api/errors";
@@ -30,6 +32,8 @@ const grantRole = useGrantRole(brandId);
 const grantOwner = useGrantOwner(brandId);
 const downgradeOwner = useDowngradeOwner(brandId);
 const revokeOwner = useRevokeOwner(brandId);
+const revokeGrant = useRevokeGrant(brandId);
+const setGrantExpiration = useSetGrantExpiration(brandId);
 
 const submitting = ref(false);
 
@@ -67,6 +71,87 @@ async function submitGrant() {
     toast.error("Grant failed", { description: errorMessage(err) });
   } finally {
     submitting.value = false;
+  }
+}
+
+// ─── Change role (non-owner) ───
+const roleOpen = ref(false);
+const roleTarget = ref<GrantListItem | null>(null);
+const newRole = ref<OrgRole>("Member");
+
+function openChangeRole(g: GrantListItem) {
+  roleTarget.value = g;
+  newRole.value = g.role;
+  roleOpen.value = true;
+}
+
+async function submitChangeRole() {
+  if (!roleTarget.value) return;
+  if (newRole.value === roleTarget.value.role) {
+    toast.error("Pick a different role");
+    return;
+  }
+  submitting.value = true;
+  try {
+    await grantRole.mutateAsync({
+      orgNodeId: roleTarget.value.orgNodeId,
+      subjectId: roleTarget.value.subjectId,
+      role: newRole.value,
+      expiresAt: roleTarget.value.expiresAt,
+    });
+    toast.success("Role updated");
+    roleOpen.value = false;
+  } catch (err) {
+    toast.error("Update failed", { description: errorMessage(err) });
+  } finally {
+    submitting.value = false;
+  }
+}
+
+// ─── Set expiration ───
+const expOpen = ref(false);
+const expTarget = ref<GrantListItem | null>(null);
+const expValue = ref("");
+
+function openSetExpiration(g: GrantListItem) {
+  expTarget.value = g;
+  expValue.value = g.expiresAt ? g.expiresAt.slice(0, 16) : "";
+  expOpen.value = true;
+}
+
+async function submitExpiration() {
+  if (!expTarget.value) return;
+  submitting.value = true;
+  try {
+    await setGrantExpiration.mutateAsync({
+      orgNodeId: expTarget.value.orgNodeId,
+      subjectId: expTarget.value.subjectId,
+      expiresAt: expValue.value ? new Date(expValue.value).toISOString() : null,
+    });
+    toast.success("Expiration updated");
+    expOpen.value = false;
+  } catch (err) {
+    toast.error("Update failed", { description: errorMessage(err) });
+  } finally {
+    submitting.value = false;
+  }
+}
+
+// ─── Revoke (non-owner) ───
+async function onRevoke(g: GrantListItem) {
+  const reason = window.prompt(
+    `Revoke ${g.role} grant for ${g.subjectEmail} on ${g.orgNodeName}? Reason (optional):`,
+  );
+  if (reason === null) return;
+  try {
+    await revokeGrant.mutateAsync({
+      orgNodeId: g.orgNodeId,
+      subjectId: g.subjectId,
+      reason: reason.trim() || null,
+    });
+    toast.success("Grant revoked");
+  } catch (err) {
+    toast.error("Revoke failed", { description: errorMessage(err) });
   }
 }
 
@@ -182,9 +267,14 @@ function fmtDate(iso: string | null) {
             <td class="px-3 py-2 text-xs text-fg-muted">{{ fmtDate(g.expiresAt) }}</td>
             <td class="px-3 py-2">
               <div class="flex justify-end gap-1">
-                <template v-if="g.role === 'Owner' && auth.isSuperAdmin">
-                  <Button size="sm" variant="ghost" @click="openDowngrade(g)">Downgrade</Button>
-                  <Button size="sm" variant="danger" @click="onRevokeOwner(g)">Revoke</Button>
+                <template v-if="g.role === 'Owner'">
+                  <Button v-if="auth.isSuperAdmin" size="sm" variant="ghost" @click="openDowngrade(g)">Downgrade</Button>
+                  <Button v-if="auth.isSuperAdmin" size="sm" variant="danger" @click="onRevokeOwner(g)">Revoke</Button>
+                </template>
+                <template v-else>
+                  <Button size="sm" variant="ghost" @click="openChangeRole(g)">Role…</Button>
+                  <Button size="sm" variant="ghost" @click="openSetExpiration(g)">Expires…</Button>
+                  <Button size="sm" variant="danger" @click="onRevoke(g)">Revoke</Button>
                 </template>
               </div>
             </td>
@@ -202,7 +292,7 @@ function fmtDate(iso: string | null) {
         </label>
         <label class="flex flex-col gap-1 text-xs uppercase tracking-wider text-fg-muted">
           Subject ID
-          <Input v-model="grantSubjectId" placeholder="sub_..." />
+          <Input v-model="grantSubjectId" placeholder="subj_..." />
         </label>
         <label class="flex flex-col gap-1 text-xs uppercase tracking-wider text-fg-muted">
           Role
@@ -226,6 +316,52 @@ function fmtDate(iso: string | null) {
         <div class="mt-2 flex justify-end gap-2">
           <Button variant="ghost" type="button" @click="createOpen = false">Cancel</Button>
           <Button variant="primary" type="submit" :loading="submitting">Grant</Button>
+        </div>
+      </form>
+    </Dialog>
+
+    <!-- Change role dialog -->
+    <Dialog
+      v-model:open="roleOpen"
+      :title="`Change role: ${roleTarget?.subjectEmail ?? ''}`"
+      :description="`Currently ${roleTarget?.role} at ${roleTarget?.orgNodeName}.`"
+    >
+      <form class="flex flex-col gap-4" @submit.prevent="submitChangeRole">
+        <label class="flex flex-col gap-1 text-xs uppercase tracking-wider text-fg-muted">
+          New role
+          <Select
+            v-model="newRole"
+            :options="[
+              { value: 'Viewer', label: 'Viewer' },
+              { value: 'Member', label: 'Member' },
+              { value: 'Admin', label: 'Admin' },
+            ]"
+          />
+        </label>
+        <p class="text-xs text-fg-muted">
+          Role changes preserve the existing expiration. Use the Expires… button to change that separately.
+        </p>
+        <div class="mt-2 flex justify-end gap-2">
+          <Button variant="ghost" type="button" @click="roleOpen = false">Cancel</Button>
+          <Button variant="primary" type="submit" :loading="submitting">Update role</Button>
+        </div>
+      </form>
+    </Dialog>
+
+    <!-- Set expiration dialog -->
+    <Dialog
+      v-model:open="expOpen"
+      :title="`Expiration: ${expTarget?.subjectEmail ?? ''}`"
+      description="Leave blank to clear the expiration."
+    >
+      <form class="flex flex-col gap-4" @submit.prevent="submitExpiration">
+        <label class="flex flex-col gap-1 text-xs uppercase tracking-wider text-fg-muted">
+          Expires at
+          <Input v-model="expValue" type="datetime-local" />
+        </label>
+        <div class="mt-2 flex justify-end gap-2">
+          <Button variant="ghost" type="button" @click="expOpen = false">Cancel</Button>
+          <Button variant="primary" type="submit" :loading="submitting">Update</Button>
         </div>
       </form>
     </Dialog>

@@ -33,4 +33,14 @@ public sealed class SubjectProjection : SingleStreamProjection<SubjectReadModel,
     {
         view.OnboardedAt = e.OnboardedAt;
     }
+
+    public void Apply(SubjectDeactivated _, SubjectReadModel view)
+    {
+        view.Active = false;
+    }
+
+    public void Apply(SubjectReactivated _, SubjectReadModel view)
+    {
+        view.Active = true;
+    }
 }

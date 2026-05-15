@@ -21,4 +21,8 @@ public static class OrgAuditActions
     public const string InvitationObsoleted = "invitation.obsoleted";
     public const string InvitationFailed = "invitation.failed";
     public const string InvitationExpired = "invitation.expired";
+    public const string GrantRevoked = "org.grant.revoked";
+    public const string SubjectDeactivated = "subject.deactivated";
+    public const string SubjectReactivated = "subject.reactivated";
+    public const string SubjectRelinked = "subject.relinked";
 }

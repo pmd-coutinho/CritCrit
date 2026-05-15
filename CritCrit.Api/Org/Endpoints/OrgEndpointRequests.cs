@@ -22,6 +22,19 @@ public sealed record DowngradeOwnerRequest(OrgRole NewRole, string Reason);
 
 public sealed record RevokeOwnerRequest(string Reason);
 
+public sealed record RevokeGrantRequest(string OrgNodeId, string SubjectId, string? Reason);
+
+public sealed record DeactivateSubjectRequest(string? Reason);
+
+public sealed record ReactivateSubjectRequest(string? Reason);
+
+public sealed record RelinkSubjectIdentityRequest(
+    string Provider,
+    string ProviderTenant,
+    string OldExternalId,
+    string NewExternalId,
+    string? Reason);
+
 public sealed record CreateInvitationRequest(string OrgNodeId, string Email, OrgRole Role);
 
 public sealed record CancelInvitationRequest(string? Reason);
