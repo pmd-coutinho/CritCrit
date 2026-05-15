@@ -35,6 +35,14 @@ public sealed record SubjectCreated(
     string Email,
     string? DisplayName);
 
+public sealed record SubjectEmailUpdated(
+    SubjectId Id,
+    string Email);
+
+public sealed record SubjectOnboarded(
+    SubjectId Id,
+    DateTimeOffset OnboardedAt);
+
 public sealed record ExternalIdentityLinked(
     SubjectId SubjectId,
     string Provider,
@@ -67,3 +75,78 @@ public sealed record OrgAccessExpired(
     OrgNodeId TenantId,
     OrgNodeId OrgNodeId,
     SubjectId SubjectId);
+
+public sealed record OrgAccessExpirationChanged(
+    OrgNodeId TenantId,
+    OrgNodeId OrgNodeId,
+    SubjectId SubjectId,
+    DateTimeOffset? OldExpiresAt,
+    DateTimeOffset? NewExpiresAt);
+
+public sealed record InvitationRequested(
+    InvitationId Id,
+    OrgNodeId TenantId,
+    OrgNodeId TargetOrgNodeId,
+    string TargetOrgNodePublicId,
+    string Email,
+    OrgRole Role,
+    SubjectId? InviterSubjectId,
+    string InviterExternalId,
+    DateTimeOffset CreatedAt);
+
+public sealed record InvitationProvisioningStarted(
+    InvitationId Id,
+    DateTimeOffset StartedAt);
+
+public sealed record InvitationSubjectBound(
+    InvitationId Id,
+    SubjectId SubjectId,
+    string Email);
+
+public sealed record InvitationTokenIssued(
+    InvitationId Id,
+    string TokenHash,
+    DateTimeOffset ExpiresAt);
+
+public sealed record InvitationMarkedPending(
+    InvitationId Id,
+    DateTimeOffset MarkedAt);
+
+public sealed record InvitationAccepted(
+    InvitationId Id,
+    DateTimeOffset AcceptedAt,
+    bool GrantCreated,
+    bool SubjectOnboarded);
+
+public sealed record InvitationAutoApplied(
+    InvitationId Id,
+    DateTimeOffset AppliedAt,
+    bool GrantCreated);
+
+public sealed record InvitationCancelled(
+    InvitationId Id,
+    DateTimeOffset CancelledAt,
+    string? Reason);
+
+public sealed record InvitationSuperseded(
+    InvitationId Id,
+    InvitationId ReplacedByInvitationId,
+    DateTimeOffset SupersededAt);
+
+public sealed record InvitationExpired(
+    InvitationId Id,
+    DateTimeOffset ExpiredAt);
+
+public sealed record InvitationObsoleted(
+    InvitationId Id,
+    DateTimeOffset ObsoletedAt,
+    string Reason);
+
+public sealed record InvitationFailed(
+    InvitationId Id,
+    DateTimeOffset FailedAt,
+    string Failure);
+
+public sealed record InvitationEmailDispatched(
+    InvitationId Id,
+    DateTimeOffset SentAt);

@@ -22,4 +22,15 @@ public sealed class SubjectProjection : SingleStreamProjection<SubjectReadModel,
             Active = true
         };
     }
+
+    public void Apply(SubjectEmailUpdated e, SubjectReadModel view)
+    {
+        view.Email = e.Email;
+        view.EmailNormalized = e.Email.Trim().ToLowerInvariant();
+    }
+
+    public void Apply(SubjectOnboarded e, SubjectReadModel view)
+    {
+        view.OnboardedAt = e.OnboardedAt;
+    }
 }

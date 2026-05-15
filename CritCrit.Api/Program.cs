@@ -8,6 +8,8 @@ using System.Text.Json;
 using CritCrit.Api.Org.Auth;
 using CritCrit.Api.Org.Domain;
 using CritCrit.Api.Org.Infrastructure;
+using CritCrit.Api.Org.Identity;
+using CritCrit.Api.Org.Invitations;
 using CritCrit.Api.Org.Projections;
 using Marten.Storage;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
@@ -22,8 +24,14 @@ using Wolverine.RabbitMQ;
 
 var builder = WebApplication.CreateBuilder(args);
 
-const string KeycloakDevBaseUrl = "http://localhost:8080";
-const string KeycloakRealm = "api";
+builder.Services.ConfigureHttpJsonOptions(o =>
+{
+    o.SerializerOptions.Converters.Add(new System.Text.Json.Serialization.JsonStringEnumConverter());
+});
+
+var keycloakBaseUrl = builder.Configuration.GetValue("Invitation:IdentityProvider:Keycloak:BaseUrl", "http://localhost:8080").TrimEnd('/');
+var keycloakRealm = builder.Configuration.GetValue("Invitation:IdentityProvider:Keycloak:Realm", "api");
+var swaggerClientId = builder.Configuration.GetValue("Keycloak:SwaggerClientId", "store.api.swagger");
 
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen(c =>
@@ -35,8 +43,8 @@ builder.Services.AddSwaggerGen(c =>
         {
             AuthorizationCode = new OpenApiOAuthFlow
             {
-                AuthorizationUrl = new Uri($"{KeycloakDevBaseUrl}/realms/{KeycloakRealm}/protocol/openid-connect/auth"),
-                TokenUrl = new Uri($"{KeycloakDevBaseUrl}/realms/{KeycloakRealm}/protocol/openid-connect/token"),
+                AuthorizationUrl = new Uri($"{keycloakBaseUrl}/realms/{keycloakRealm}/protocol/openid-connect/auth"),
+                TokenUrl = new Uri($"{keycloakBaseUrl}/realms/{keycloakRealm}/protocol/openid-connect/token"),
                 Scopes = new Dictionary<string, string>
                 {
                     ["openid"] = "OpenID",
@@ -67,6 +75,9 @@ builder.Services.AddMarten(m =>
     m.Schema.For<ExternalIdentityReadModel>().SingleTenanted();
     m.Schema.For<BrandTombstone>().SingleTenanted();
     m.Schema.For<ImmutableAuditEvent>().SingleTenanted();
+    m.Schema.For<InvitationReadModel>().SingleTenanted();
+    m.Schema.For<BrandIndexReadModel>().SingleTenanted();
+    m.Schema.For<SubjectBrandAccessReadModel>().SingleTenanted();
 
     // 50% improvement in throughput, less "event skipping"
     m.Events.AppendMode = EventAppendMode.Quick;
@@ -111,6 +122,9 @@ builder.Services.AddMarten(m =>
     m.Projections.Add<ExternalIdentityProjection>(ProjectionLifecycle.Inline);
     m.Projections.Add<GrantProjection>(ProjectionLifecycle.Inline);
     m.Projections.Add<MoveOrgNodeProjection>(ProjectionLifecycle.Inline);
+    m.Projections.Add<InvitationProjection>(ProjectionLifecycle.Inline);
+    m.Projections.Add<BrandIndexProjection>(ProjectionLifecycle.Inline);
+    m.Projections.Add<SubjectBrandAccessProjection>(ProjectionLifecycle.Inline);
 })
  .ApplyAllDatabaseChangesOnStartup()
  // This will remove some runtime overhead from Marten
@@ -127,7 +141,13 @@ builder.Services.AddWolverine(opts =>
 {
     opts.UseRabbitMqUsingNamedConnection("rabbitmq")
         .AutoProvision()
-        .EnableWolverineControlQueues();
+        .EnableWolverineControlQueues()
+        // Multi-pod deployment: routes every PublishAsync / ScheduleAsync through
+        // RabbitMQ so any pod in the deployment can pick the message up. InvokeAsync
+        // stays in-process (request/response semantics). Scheduled messages use
+        // Marten outbox + Wolverine durability agent for at-least-once delivery
+        // across pod restarts.
+        .UseConventionalRouting();
     
     // This *should* have some performance improvements, but would
     // require downtime to enable in existing systems
@@ -150,10 +170,35 @@ builder.Services.AddWolverine(opts =>
 });
 
 builder.Services.AddWolverineHttp();
+builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<OrgAuthorizationService>();
+builder.Services.AddScoped<INodeAuthorizer>(sp => sp.GetRequiredService<OrgAuthorizationService>());
+builder.Services.AddScoped<ActorContext>(sp =>
+{
+    var http = sp.GetRequiredService<IHttpContextAccessor>().HttpContext
+        ?? throw new InvalidOperationException("ActorContext requires an HTTP request.");
+    var actor = http.Items[RequestActorMiddleware.ItemKey] as ActorContext
+        ?? throw new InvalidOperationException("ActorContext was not resolved. Ensure RequestActorMiddleware runs after authentication.");
+    if (!actor.IsAuthenticated)
+        throw new DomainException("Authentication required.", 401);
+    return actor;
+});
+builder.Services.AddScoped<BrandTenantContext>(sp =>
+{
+    var http = sp.GetRequiredService<IHttpContextAccessor>().HttpContext
+        ?? throw new InvalidOperationException("BrandTenantContext requires an HTTP request.");
+    return http.Items[BrandTenantContext.ItemKey] as BrandTenantContext
+        ?? throw new DomainException("Brand tenant not resolved.");
+});
+builder.Services.AddSingleton<InvitationTokenService>();
+builder.Services.Configure<KeycloakProvisioningOptions>(builder.Configuration.GetSection(KeycloakProvisioningOptions.SectionName));
 
 if (builder.Environment.IsEnvironment("Testing"))
 {
+    builder.Services.AddSingleton<TestIdentityProviderStore>();
+    builder.Services.AddSingleton<IIdentityProviderProvisioning, InMemoryIdentityProviderProvisioning>();
+    builder.Services.AddSingleton<TestInvitationEmailStore>();
+    builder.Services.AddSingleton<IInvitationEmailSender, InMemoryInvitationEmailSender>();
     builder.Services.AddAuthentication(TestAuthenticationHandler.SchemeName)
         .AddScheme<Microsoft.AspNetCore.Authentication.AuthenticationSchemeOptions, TestAuthenticationHandler>(
             TestAuthenticationHandler.SchemeName,
@@ -161,10 +206,12 @@ if (builder.Environment.IsEnvironment("Testing"))
 }
 else
 {
+    builder.Services.AddHttpClient<IIdentityProviderProvisioning, KeycloakIdentityProviderProvisioning>();
+    builder.Services.AddSingleton<IInvitationEmailSender, SmtpInvitationEmailSender>();
     builder.Services.AddAuthentication()
         .AddKeycloakJwtBearer(
         serviceName: "keycloak",
-        realm: KeycloakRealm,
+        realm: keycloakRealm,
         options =>
         {
             options.Audience = "store.api";
@@ -176,7 +223,7 @@ else
                 options.RequireHttpsMetadata = false;
                 options.TokenValidationParameters.ValidIssuers =
                 [
-                    $"{KeycloakDevBaseUrl}/realms/{KeycloakRealm}"
+                    $"{keycloakBaseUrl}/realms/{keycloakRealm}"
                 ];
             }
 
@@ -186,6 +233,14 @@ else
                 {
                     if (ctx.Principal?.Identity is not ClaimsIdentity identity)
                         return Task.CompletedTask;
+
+                    // Match the provider/tenant labels written by the invitation
+                    // workflow when linking external identities — otherwise actor
+                    // lookup can't find the SubjectId for Keycloak-issued tokens.
+                    if (!identity.HasClaim(c => c.Type == "idp"))
+                        identity.AddClaim(new Claim("idp", "keycloak"));
+                    if (!identity.HasClaim(c => c.Type == "idp_tenant"))
+                        identity.AddClaim(new Claim("idp_tenant", keycloakRealm));
 
                     var realmAccess = identity.FindFirst("realm_access")?.Value;
                     if (!string.IsNullOrEmpty(realmAccess))
@@ -211,6 +266,21 @@ else
 
 builder.Services.AddAuthorization();
 
+var allowedCorsOrigins = builder.Configuration
+    .GetSection("Cors:AllowedOrigins")
+    .Get<string[]>() ?? ["http://localhost:5173", "http://127.0.0.1:5173"];
+
+builder.Services.AddCors(options =>
+{
+    options.AddDefaultPolicy(policy =>
+    {
+        policy.WithOrigins(allowedCorsOrigins)
+              .AllowAnyHeader()
+              .AllowAnyMethod()
+              .AllowCredentials();
+    });
+});
+
 var app = builder.Build();
 
 // Configure the HTTP request pipeline.
@@ -222,7 +292,7 @@ if (app.Environment.IsDevelopment())
         opts.AddPreferredSecuritySchemes("keycloak")
             .AddAuthorizationCodeFlow("keycloak", flow =>
             {
-                flow.ClientId = "store.api.swagger";
+                flow.ClientId = swaggerClientId;
                 flow.Pkce = Pkce.Sha256;
                 flow.SelectedScopes = ["openid", "profile"];
             });
@@ -231,17 +301,26 @@ if (app.Environment.IsDevelopment())
 
 app.UseHttpsRedirection();
 
+app.UseCors();
 app.MapDefaultEndpoints();
 app.UseAuthentication();
 app.UseAuthorization();
 app.UseMiddleware<DomainExceptionMiddleware>();
+app.UseMiddleware<RequestActorMiddleware>();
 app.UseMiddleware<BrandTenantMiddleware>();
 
 app.MapWolverineEndpoints(c =>
 {
     c.UseFluentValidationProblemDetailMiddleware();
     c.ServiceProviderSource = ServiceProviderSource.FromHttpContextRequestServices;
-    c.SourceServiceFromHttpContext<IDocumentStore>();
+
+    // ActorContext + BrandTenantContext are registered as scoped lambda factories
+    // (they read from HttpContext.Items populated by upstream middleware). Wolverine
+    // codegen can't introspect lambda factories, so tell it to resolve these via
+    // HttpContext.RequestServices instead of trying to inline a constructor call.
+    // Safe here because both types are only ever injected into HTTP endpoints.
+    c.SourceServiceFromHttpContext<ActorContext>();
+    c.SourceServiceFromHttpContext<BrandTenantContext>();
 });
 
 return await app.RunJasperFxCommands(args);

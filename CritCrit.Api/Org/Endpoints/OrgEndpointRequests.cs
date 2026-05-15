@@ -14,6 +14,18 @@ public sealed record CreateSubjectRequest(string Email, string? DisplayName, str
 
 public sealed record GrantRoleRequest(string OrgNodeId, string SubjectId, OrgRole Role, DateTimeOffset? ExpiresAt);
 
+public sealed record SetGrantExpirationRequest(string OrgNodeId, string SubjectId, DateTimeOffset? ExpiresAt);
+
+public sealed record GrantOwnerRequest(string SubjectId);
+
+public sealed record DowngradeOwnerRequest(OrgRole NewRole, string Reason);
+
+public sealed record RevokeOwnerRequest(string Reason);
+
+public sealed record CreateInvitationRequest(string OrgNodeId, string Email, OrgRole Role);
+
+public sealed record CancelInvitationRequest(string? Reason);
+
 public sealed record OrgNodeResponse(
     string Id,
     string TenantId,
@@ -26,9 +38,86 @@ public sealed record OrgNodeResponse(
     bool EffectiveArchived,
     bool HardDeleted);
 
+public sealed record BrandListItem(
+    string Id,
+    string Code,
+    string Name,
+    bool Archived,
+    OrgRole? HighestRole,
+    BrandAccessSource Source);
+
+public enum BrandAccessSource
+{
+    Grant,
+    Platform
+}
+
+public sealed record OrgTreeNodeResponse(
+    string Id,
+    string? ParentId,
+    OrgNodeType Type,
+    string Code,
+    string Name,
+    string Path,
+    bool Archived,
+    bool EffectiveArchived,
+    IReadOnlyList<OrgTreeNodeResponse> Children);
+
 public sealed record SubjectResponse(string Id, string Email, string? DisplayName);
 
+public sealed record SubjectListItem(
+    string Id,
+    string Email,
+    string? DisplayName,
+    SubjectKind Kind,
+    bool Active,
+    DateTimeOffset? OnboardedAt);
+
 public sealed record GrantResponse(string Id, string OrgNodeId, string SubjectId, OrgRole Role, DateTimeOffset? ExpiresAt);
+
+public sealed record GrantListItem(
+    string Id,
+    string OrgNodeId,
+    string OrgNodeName,
+    OrgNodeType OrgNodeType,
+    string SubjectId,
+    string SubjectEmail,
+    string? SubjectDisplayName,
+    OrgRole Role,
+    DateTimeOffset? ExpiresAt,
+    OrgAccessGrantSource Source);
+
+public sealed record InvitationResponse(
+    string Id,
+    string BrandId,
+    string OrgNodeId,
+    string Email,
+    string? SubjectId,
+    OrgRole Role,
+    InvitationStatus Status,
+    DateTimeOffset CreatedAt,
+    DateTimeOffset? ExpiresAt,
+    DateTimeOffset? AcceptedAt,
+    DateTimeOffset? LastSentAt,
+    string? Failure);
+
+public sealed record AcceptInvitationResponse(
+    string InvitationId,
+    InvitationStatus Status,
+    bool GrantCreated,
+    bool SubjectOnboarded,
+    int AutoAppliedInvitations);
+
+public sealed record AuditEventResponse(
+    Guid Id,
+    string Action,
+    DateTimeOffset OccurredAt,
+    string? Reason,
+    string ActorExternalId,
+    Guid? ActorSubjectId,
+    Guid? TenantId,
+    Guid? TargetOrgNodeId,
+    object? Details);
 
 public sealed record ArchiveOrgNodeRequest(bool Force, string? Reason);
 

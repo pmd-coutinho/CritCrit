@@ -57,4 +57,16 @@ public static class OrgPublicId
     }
 
     public static string FormatInvitation(InvitationId id) => $"inv_{id.Value}";
+
+    public static bool TryParseInvitation(string value, out InvitationId id)
+    {
+        id = default;
+        const string prefix = "inv_";
+        if (!value.StartsWith(prefix, StringComparison.Ordinal) ||
+            !Guid.TryParse(value[prefix.Length..], out var guid))
+            return false;
+
+        id = new InvitationId(guid);
+        return true;
+    }
 }

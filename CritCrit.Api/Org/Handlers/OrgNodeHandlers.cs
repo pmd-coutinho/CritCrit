@@ -15,12 +15,12 @@ public static class OrgNodeHandlers
         string brandId,
         IDocumentStore store,
         OrgAuthorizationService authorization,
-        HttpContext httpContext,
+        BrandTenantContext tenant,
+        ActorContext actor,
         CancellationToken ct)
     {
-        var tenant = HandlerContext.GetTenant(httpContext);
-        await using var session = HandlerContext.TenantSession(store, tenant);
-        var actor = await HandlerContext.ResolveActorAsync(httpContext, store, ct);
+        await using var session = SessionFactory.TenantSession(store, tenant);
+        SessionMetadata.StampActor(session, actor);
 
         if (!OrgPublicId.TryParseOrgNode(request.ParentId, out var parentId, out _))
             throw new DomainException("Invalid parent ID.");
@@ -47,12 +47,12 @@ public static class OrgNodeHandlers
         string brandId,
         IDocumentStore store,
         OrgAuthorizationService authorization,
-        HttpContext httpContext,
+        BrandTenantContext tenant,
+        ActorContext actor,
         CancellationToken ct)
     {
-        var tenant = HandlerContext.GetTenant(httpContext);
-        await using var session = HandlerContext.TenantSession(store, tenant);
-        var actor = await HandlerContext.ResolveActorAsync(httpContext, store, ct);
+        await using var session = SessionFactory.TenantSession(store, tenant);
+        SessionMetadata.StampActor(session, actor);
 
         if (!OrgPublicId.TryParseOrgNode(request.ParentId, out var parentId, out _))
             throw new DomainException("Invalid parent ID.");
@@ -79,12 +79,12 @@ public static class OrgNodeHandlers
         string brandId,
         IDocumentStore store,
         OrgAuthorizationService authorization,
-        HttpContext httpContext,
+        BrandTenantContext tenant,
+        ActorContext actor,
         CancellationToken ct)
     {
-        var tenant = HandlerContext.GetTenant(httpContext);
-        await using var session = HandlerContext.TenantSession(store, tenant);
-        var actor = await HandlerContext.ResolveActorAsync(httpContext, store, ct);
+        await using var session = SessionFactory.TenantSession(store, tenant);
+        SessionMetadata.StampActor(session, actor);
 
         if (!OrgPublicId.TryParseOrgNode(request.ParentId, out var parentId, out _))
             throw new DomainException("Invalid parent ID.");
@@ -114,12 +114,12 @@ public static class OrgNodeHandlers
         string brandId,
         IDocumentStore store,
         OrgAuthorizationService authorization,
-        HttpContext httpContext,
+        BrandTenantContext tenant,
+        ActorContext actor,
         CancellationToken ct)
     {
-        var tenant = HandlerContext.GetTenant(httpContext);
-        await using var session = HandlerContext.TenantSession(store, tenant);
-        var actor = await HandlerContext.ResolveActorAsync(httpContext, store, ct);
+        await using var session = SessionFactory.TenantSession(store, tenant);
+        SessionMetadata.StampActor(session, actor);
 
         if (!OrgPublicId.TryParseOrgNode(request.ParentStoreId, OrgNodeType.Store, out var parentStoreId))
             throw new DomainException("Invalid parent store ID.");
@@ -151,12 +151,12 @@ public static class OrgNodeHandlers
         string brandId,
         IDocumentStore store,
         OrgAuthorizationService authorization,
-        HttpContext httpContext,
+        BrandTenantContext tenant,
+        ActorContext actor,
         CancellationToken ct)
     {
-        var tenant = HandlerContext.GetTenant(httpContext);
-        await using var session = HandlerContext.TenantSession(store, tenant);
-        var actor = await HandlerContext.ResolveActorAsync(httpContext, store, ct);
+        await using var session = SessionFactory.TenantSession(store, tenant);
+        SessionMetadata.StampActor(session, actor);
 
         if (!OrgPublicId.TryParseOrgNode(nodeId, out var id, out _))
             throw new DomainException("Invalid org node ID.");
@@ -169,13 +169,29 @@ public static class OrgNodeHandlers
         if (target.Archived)
             throw new DomainException("Org node is already archived.");
 
-        await authorization.EnforceRoleAsync(session, actor, target, OrgRole.Admin, ct);
+        if (target.Type == OrgNodeType.Brand)
+        {
+            if (!request.Force)
+                throw new DomainException("Archiving a brand requires force=true.");
+            if (string.IsNullOrWhiteSpace(request.Reason))
+                throw new DomainException("A reason is required when archiving a brand.");
+
+            await authorization.EnforceRootOwnerOrSuperAdminAsync(session, actor, target, ct);
+        }
+        else
+        {
+            await authorization.EnforceRoleAsync(session, actor, target, OrgRole.Admin, ct);
+        }
 
         if (!request.Force)
         {
             var hasChildren = await OrgValidation.HasActiveChildrenAsync(session, id, tenant.TenantId.Value, ct);
             if (hasChildren)
                 throw new DomainException("Org node has active children. Use force=true to cascade archive.");
+        }
+        else if (string.IsNullOrWhiteSpace(request.Reason))
+        {
+            throw new DomainException("A reason is required when force-archiving an org node.");
         }
 
         session.Events.Append(id.Value, new OrgNodeArchived(id, request.Force, request.Reason));
@@ -188,10 +204,24 @@ public static class OrgNodeHandlers
                 descendant.EffectiveArchived = true;
                 session.Store(descendant);
             }
+
+            AuditLog.Write(
+                session,
+                target.Type == OrgNodeType.Brand ? OrgAuditActions.BrandArchive : OrgAuditActions.CascadeArchive,
+                actor,
+                tenant.TenantId.Value,
+                id.Value,
+                request.Reason,
+                new
+                {
+                    TargetId = target.PublicId,
+                    DescendantCount = descendants.Count
+                });
         }
 
         await session.SaveChangesAsync(ct);
-        var archived = await session.LoadAsync<OrgNodeReadModel>(id.Value, ct)!;
+        var archived = await session.LoadAsync<OrgNodeReadModel>(id.Value, ct)
+            ?? throw new InvalidOperationException("Projection failed to update OrgNodeReadModel.");
         return BrandHandlers.ToResponse(archived);
     }
 
@@ -201,12 +231,12 @@ public static class OrgNodeHandlers
         string brandId,
         IDocumentStore store,
         OrgAuthorizationService authorization,
-        HttpContext httpContext,
+        BrandTenantContext tenant,
+        ActorContext actor,
         CancellationToken ct)
     {
-        var tenant = HandlerContext.GetTenant(httpContext);
-        await using var session = HandlerContext.TenantSession(store, tenant);
-        var actor = await HandlerContext.ResolveActorAsync(httpContext, store, ct);
+        await using var session = SessionFactory.TenantSession(store, tenant);
+        SessionMetadata.StampActor(session, actor);
 
         if (!OrgPublicId.TryParseOrgNode(nodeId, out var id, out _))
             throw new DomainException("Invalid org node ID.");
@@ -219,12 +249,59 @@ public static class OrgNodeHandlers
         if (!target.Archived)
             throw new DomainException("Org node is not archived.");
 
-        await authorization.EnforceRoleAsync(session, actor, target, OrgRole.Admin, ct);
+        if (target.Type == OrgNodeType.Brand)
+            await authorization.EnforceRootOwnerOrSuperAdminAsync(session, actor, target, ct);
+        else
+            await authorization.EnforceRoleAsync(session, actor, target, OrgRole.Admin, ct);
 
         session.Events.Append(id.Value, new OrgNodeRestored(id));
 
+        var descendants = await OrgValidation.LoadDescendantsAsync(session, id, tenant.TenantId.Value, ct);
+        if (descendants.Count != 0)
+        {
+            var ancestorIds = descendants
+                .SelectMany(x => x.AncestorIds)
+                .Where(x => x != id.Value)
+                .Distinct()
+                .ToArray();
+
+            var archivedAncestorIds = ancestorIds.Length == 0
+                ? []
+                : (await session.Query<OrgNodeReadModel>()
+                    .Where(x => x.TenantId == tenant.TenantId.Value && ancestorIds.Contains(x.Id) && x.Archived)
+                    .Select(x => x.Id)
+                    .ToListAsync(ct))
+                .ToHashSet();
+
+            foreach (var descendant in descendants)
+            {
+                descendant.EffectiveArchived = descendant.Archived ||
+                                               descendant.AncestorIds
+                                                   .Where(x => x != id.Value)
+                                                   .Any(archivedAncestorIds.Contains);
+                session.Store(descendant);
+            }
+        }
+
+        if (target.Type == OrgNodeType.Brand)
+        {
+            AuditLog.Write(
+                session,
+                OrgAuditActions.BrandRestore,
+                actor,
+                tenant.TenantId.Value,
+                id.Value,
+                null,
+                new
+                {
+                    TargetId = target.PublicId,
+                    DescendantCount = descendants.Count
+                });
+        }
+
         await session.SaveChangesAsync(ct);
-        var restored = await session.LoadAsync<OrgNodeReadModel>(id.Value, ct)!;
+        var restored = await session.LoadAsync<OrgNodeReadModel>(id.Value, ct)
+            ?? throw new InvalidOperationException("Projection failed to update OrgNodeReadModel.");
         return BrandHandlers.ToResponse(restored);
     }
 
@@ -236,12 +313,12 @@ public static class OrgNodeHandlers
         string brandId,
         IDocumentStore store,
         OrgAuthorizationService authorization,
-        HttpContext httpContext,
+        BrandTenantContext tenant,
+        ActorContext actor,
         CancellationToken ct)
     {
-        var tenant = HandlerContext.GetTenant(httpContext);
-        await using var session = HandlerContext.TenantSession(store, tenant);
-        var actor = await HandlerContext.ResolveActorAsync(httpContext, store, ct);
+        await using var session = SessionFactory.TenantSession(store, tenant);
+        SessionMetadata.StampActor(session, actor);
 
         if (!OrgPublicId.TryParseOrgNode(nodeId, out var id, out _))
             throw new DomainException("Invalid org node ID.");
@@ -252,12 +329,40 @@ public static class OrgNodeHandlers
         if (target.HardDeleted)
             throw new DomainException("Org node is already hard-deleted.");
 
-        authorization.EnforceSuperAdmin(actor);
+        await authorization.EnforceRootOwnerOrSuperAdminAsync(session, actor, target, ct);
 
         var descendants = await OrgValidation.LoadDescendantsAsync(session, id, tenant.TenantId.Value, ct);
-        session.Events.Append(id.Value, new OrgNodeHardDeleted(id, request.Reason));
-        foreach (var descendant in descendants)
-            session.Events.Append(descendant.Id, new OrgNodeHardDeleted(new OrgNodeId(descendant.Id), request.Reason));
+        var subtree = new[] { target }.Concat(descendants).ToArray();
+
+        foreach (var node in subtree)
+        {
+            var subtreeNodeId = new OrgNodeId(node.Id);
+            session.Events.Append(node.Id, new OrgNodeHardDeleted(subtreeNodeId, request.Reason));
+
+            if (node.Type == OrgNodeType.Store)
+                session.Events.Append(node.Id, new StoreProfileHardDeleted(subtreeNodeId));
+            else if (node.Type == OrgNodeType.Device)
+                session.Events.Append(node.Id, new DeviceProfileHardDeleted(subtreeNodeId));
+        }
+
+        var subtreeIds = subtree.Select(x => x.Id).ToArray();
+        var activeGrants = await session.Query<OrgAccessGrantReadModel>()
+            .Where(x => x.TenantId == tenant.TenantId.Value &&
+                        subtreeIds.Contains(x.OrgNodeId) &&
+                        x.Status == OrgAccessGrantStatus.Active)
+            .ToListAsync(ct);
+
+        var now = TimeProvider.System.GetUtcNow();
+        foreach (var grant in activeGrants.Where(x => x.ExpiresAt is null || x.ExpiresAt > now))
+        {
+            session.Events.Append(
+                grant.StreamId,
+                new OrgAccessRevoked(
+                    tenant.TenantId,
+                    new OrgNodeId(grant.OrgNodeId),
+                    new SubjectId(grant.SubjectId),
+                    OrgAccessRevokedReason.TargetHardDeleted));
+        }
 
         if (target.Type == OrgNodeType.Brand)
         {
@@ -271,6 +376,20 @@ public static class OrgNodeHandlers
             });
         }
 
+        AuditLog.Write(
+            session,
+            OrgAuditActions.HardDeleteSubtree,
+            actor,
+            tenant.TenantId.Value,
+            id.Value,
+            request.Reason,
+            new
+            {
+                TargetId = target.PublicId,
+                DeletedNodes = subtree.Select(DescribeNode).ToArray(),
+                RevokedGrantCount = activeGrants.Count(x => x.ExpiresAt is null || x.ExpiresAt > now)
+            });
+
         await session.SaveChangesAsync(ct);
     }
 
@@ -281,12 +400,12 @@ public static class OrgNodeHandlers
         string brandId,
         IDocumentStore store,
         OrgAuthorizationService authorization,
-        HttpContext httpContext,
+        BrandTenantContext tenant,
+        ActorContext actor,
         CancellationToken ct)
     {
-        var tenant = HandlerContext.GetTenant(httpContext);
-        await using var session = HandlerContext.TenantSession(store, tenant);
-        var actor = await HandlerContext.ResolveActorAsync(httpContext, store, ct);
+        await using var session = SessionFactory.TenantSession(store, tenant);
+        SessionMetadata.StampActor(session, actor);
 
         if (!OrgPublicId.TryParseOrgNode(nodeId, out var id, out _))
             throw new DomainException("Invalid org node ID.");
@@ -315,9 +434,83 @@ public static class OrgNodeHandlers
 
         var oldParentId = target.ParentId is not null ? new OrgNodeId(target.ParentId.Value) : tenant.TenantId;
         session.Events.Append(id.Value, new OrgNodeMoved(id, oldParentId, newParentId, request.Reason));
+        AuditLog.Write(
+            session,
+            OrgAuditActions.OrgNodeMove,
+            actor,
+            tenant.TenantId.Value,
+            id.Value,
+            request.Reason,
+            new
+            {
+                TargetId = target.PublicId,
+                OldParentId = target.ParentPublicId ?? tenant.BrandPublicId,
+                NewParentId = newParent.PublicId
+            });
 
         await session.SaveChangesAsync(ct);
-        var moved = await session.LoadAsync<OrgNodeReadModel>(id.Value, ct)!;
+
+        // Trigger cleanup for redundant grants in the moved subtree
+        // Inline because the projection has updated ancestry by now
+        await using var cleanupSession = store.LightweightSession(tenant.TenantId.Value.ToString());
+        var movedNodeAfter = await cleanupSession.LoadAsync<OrgNodeReadModel>(id.Value, ct)
+            ?? throw new InvalidOperationException("Moved node projection missing after save.");
+
+        var subtreeNodes = await cleanupSession.Query<OrgNodeReadModel>()
+            .Where(x => x.TenantId == tenant.TenantId.Value &&
+                        x.AncestorIds.Contains(id.Value) &&
+                        !x.HardDeleted)
+            .ToListAsync(ct);
+
+        var allNodes = subtreeNodes.Prepend(movedNodeAfter).ToList();
+        var subtreeNodeIds = allNodes.Select(x => x.Id).ToHashSet();
+        var now = TimeProvider.System.GetUtcNow();
+
+        var subtreeGrants = await cleanupSession.Query<OrgAccessGrantReadModel>()
+            .Where(x => x.TenantId == tenant.TenantId.Value &&
+                        subtreeNodeIds.Contains(x.OrgNodeId) &&
+                        x.Status == OrgAccessGrantStatus.Active)
+            .ToListAsync(ct);
+
+        var changed = false;
+        foreach (var grant in subtreeGrants.Where(g => g.ExpiresAt is null || g.ExpiresAt > now))
+        {
+            var grantNode = allNodes.FirstOrDefault(x => x.Id == grant.OrgNodeId);
+            if (grantNode is null)
+                continue;
+
+            var externalAncestors = grantNode.AncestorIds.Where(a => !subtreeNodeIds.Contains(a)).ToArray();
+            if (externalAncestors.Length == 0)
+                continue;
+
+            var ancestorGrants = await cleanupSession.Query<OrgAccessGrantReadModel>()
+                .Where(x => x.TenantId == tenant.TenantId.Value &&
+                            x.SubjectId == grant.SubjectId &&
+                            externalAncestors.Contains(x.OrgNodeId) &&
+                            x.Status == OrgAccessGrantStatus.Active)
+                .ToListAsync(ct);
+
+            var strongestAncestor = ancestorGrants
+                .Where(g => g.ExpiresAt is null || g.ExpiresAt > now)
+                .OrderByDescending(g => g.Role)
+                .FirstOrDefault();
+
+            if (strongestAncestor is not null && strongestAncestor.Role >= grant.Role)
+            {
+                cleanupSession.Events.Append(grant.StreamId,
+                    new OrgAccessRevoked(
+                        tenant.TenantId,
+                        new OrgNodeId(grant.OrgNodeId),
+                        new SubjectId(grant.SubjectId),
+                        OrgAccessRevokedReason.RedundantByAncestorGrant));
+                changed = true;
+            }
+        }
+
+        if (changed)
+            await cleanupSession.SaveChangesAsync(ct);
+        var moved = await session.LoadAsync<OrgNodeReadModel>(id.Value, ct)
+            ?? throw new InvalidOperationException("Projection failed to update OrgNodeReadModel.");
         return BrandHandlers.ToResponse(moved);
     }
 
@@ -343,4 +536,13 @@ public static class OrgNodeHandlers
         await authorization.EnforceRoleAsync(session, actor, parent, OrgRole.Admin, ct);
         return parent;
     }
+
+    private static object DescribeNode(OrgNodeReadModel node) => new
+    {
+        node.PublicId,
+        node.Type,
+        node.Code,
+        node.Name,
+        node.ParentPublicId
+    };
 }

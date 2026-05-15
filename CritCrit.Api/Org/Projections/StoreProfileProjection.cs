@@ -27,6 +27,7 @@ public sealed class StoreProfileProjection : EventProjection
 
     public void Project(StoreProfileHardDeleted e, IDocumentOperations ops)
     {
-        ops.Delete<StoreProfileReadModel>(e.StoreId.Value);
+        ops.Patch<StoreProfileReadModel>(e.StoreId.Value)
+            .Set(x => x.HardDeleted, true);
     }
 }

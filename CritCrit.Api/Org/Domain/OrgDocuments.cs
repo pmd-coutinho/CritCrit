@@ -58,6 +58,7 @@ public sealed class SubjectReadModel
     public string EmailNormalized { get; set; } = "";
     public string? DisplayName { get; set; }
     public bool Active { get; set; }
+    public DateTimeOffset? OnboardedAt { get; set; }
 }
 
 public sealed class ExternalIdentityReadModel
@@ -101,15 +102,60 @@ public sealed class BrandTombstone
     public DateTimeOffset DeletedAt { get; set; }
 }
 
-public sealed class ImmutableAuditEvent
+public sealed class BrandIndexReadModel
+{
+    public Guid Id { get; set; }                    // brand tenant/node id
+    public string PublicId { get; set; } = "";      // br_...
+    public string Code { get; set; } = "";
+    public string Name { get; set; } = "";
+    public bool Archived { get; set; }
+    public DateTimeOffset CreatedAt { get; set; }
+}
+
+public sealed class SubjectBrandAccessReadModel
+{
+    public string Id { get; set; } = "";            // subjectId:tenantId
+    public Guid SubjectId { get; set; }
+    public Guid TenantId { get; set; }
+    public List<SubjectBrandGrantEntry> Grants { get; set; } = [];
+    public OrgRole? HighestRole { get; set; }
+    public DateTimeOffset UpdatedAt { get; set; }
+
+    public static string BuildId(SubjectId subjectId, OrgNodeId tenantId) =>
+        $"{subjectId.Value:N}:{tenantId.Value:N}";
+}
+
+public sealed class SubjectBrandGrantEntry
+{
+    public Guid OrgNodeId { get; set; }
+    public OrgRole Role { get; set; }
+}
+
+public sealed class InvitationReadModel
 {
     public Guid Id { get; set; }
-    public string Action { get; set; } = "";
-    public Guid? TenantId { get; set; }
-    public Guid? TargetOrgNodeId { get; set; }
-    public string? Reason { get; set; }
-    public string ActorExternalId { get; set; } = "";
-    public Guid? ActorSubjectId { get; set; }
-    public DateTimeOffset OccurredAt { get; set; }
-    public object? Details { get; set; }
+    public string PublicId { get; set; } = "";
+    public Guid TenantId { get; set; }
+    public string TenantPublicId { get; set; } = "";
+    public Guid TargetOrgNodeId { get; set; }
+    public string TargetOrgNodePublicId { get; set; } = "";
+    public string Email { get; set; } = "";
+    public string EmailNormalized { get; set; } = "";
+    public Guid? SubjectId { get; set; }
+    public string? SubjectPublicId { get; set; }
+    public OrgRole Role { get; set; }
+    public InvitationStatus Status { get; set; }
+    public string? TokenHash { get; set; }
+    public DateTimeOffset CreatedAt { get; set; }
+    public DateTimeOffset UpdatedAt { get; set; }
+    public DateTimeOffset? ExpiresAt { get; set; }
+    public DateTimeOffset? AcceptedAt { get; set; }
+    public DateTimeOffset? CompletedAt { get; set; }
+    public DateTimeOffset? LastSentAt { get; set; }
+    public string InviterExternalId { get; set; } = "";
+    public Guid? InviterSubjectId { get; set; }
+    public string? Failure { get; set; }
+
+    public bool IsPendingLike() =>
+        Status is InvitationStatus.Requested or InvitationStatus.Provisioning or InvitationStatus.Pending;
 }

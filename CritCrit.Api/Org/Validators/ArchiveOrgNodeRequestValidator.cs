@@ -9,5 +9,9 @@ public sealed class ArchiveOrgNodeRequestValidator : AbstractValidator<ArchiveOr
     {
         RuleFor(x => x.Force);
         RuleFor(x => x.Reason).MaximumLength(500);
+        When(x => x.Force, () =>
+        {
+            RuleFor(x => x.Reason).NotEmpty();
+        });
     }
 }

@@ -1,10 +1,12 @@
 using CritCrit.Api.Org.Auth;
 using CritCrit.Api.Org.Domain;
+using CritCrit.Api.Platform.Auth;
+using CritCrit.Api.Platform.Errors;
 using Marten;
 
 namespace CritCrit.Api.Org.Infrastructure;
 
-public sealed class OrgAuthorizationService
+public sealed class OrgAuthorizationService : INodeAuthorizer
 {
     public async Task<OrgRole?> GetEffectiveRoleAsync(
         IQuerySession session,
@@ -74,6 +76,18 @@ public sealed class OrgAuthorizationService
     {
         if (!actor.IsSuperAdmin)
             throw new DomainException("SuperAdmin access required.", 403);
+    }
+
+    public async Task EnforceRootOwnerOrSuperAdminAsync(
+        IQuerySession session,
+        ActorContext actor,
+        OrgNodeReadModel target,
+        CancellationToken ct)
+    {
+        if (actor.IsSuperAdmin)
+            return;
+
+        await EnforceRoleAsync(session, actor, target, OrgRole.Owner, ct);
     }
 
     public async Task EnforceRoleAsync(

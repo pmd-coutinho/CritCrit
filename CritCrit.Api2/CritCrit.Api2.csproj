@@ -1,0 +1,30 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+    <PropertyGroup>
+        <TargetFramework>net10.0</TargetFramework>
+        <Nullable>enable</Nullable>
+        <ImplicitUsings>enable</ImplicitUsings>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <PackageReference Include="Aspire.Npgsql" Version="13.3.2" />
+        <PackageReference Include="Marten.AspNetCore" Version="8.37.0" />
+        <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="10.0.8"/>
+        <PackageReference Include="Scalar.AspNetCore.Swashbuckle" Version="2.14.11" />
+        <PackageReference Include="WolverineFx.FluentValidation" Version="5.39.1" />
+        <PackageReference Include="WolverineFx.Http" Version="5.39.1" />
+        <PackageReference Include="WolverineFx.Http.FluentValidation" Version="5.39.1" />
+        <PackageReference Include="WolverineFx.Http.Marten" Version="5.39.1" />
+        <PackageReference Include="WolverineFx.Marten" Version="5.39.1" />
+        <PackageReference Include="WolverineFx.RabbitMQ" Version="5.39.1" />
+    </ItemGroup>
+
+    <ItemGroup>
+      <ProjectReference Include="..\CritCrit.ServiceDefaults\CritCrit.ServiceDefaults.csproj" />
+    </ItemGroup>
+
+    <ItemGroup>
+      <Folder Include="Org\Endpoints\" />
+    </ItemGroup>
+
+</Project>

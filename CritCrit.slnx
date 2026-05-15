@@ -1,6 +1,9 @@
 <Solution>
+  <Project Path="CritCrit.AlbaTests/CritCrit.AlbaTests.csproj" />
   <Project Path="CritCrit.Api/CritCrit.Api.csproj" />
+  <Project Path="CritCrit.Api2/CritCrit.Api2.csproj" />
   <Project Path="CritCrit.AppHost/CritCrit.AppHost.csproj" />
   <Project Path="CritCrit.ServiceDefaults/CritCrit.ServiceDefaults.csproj" />
   <Project Path="CritCrit.Test/CritCrit.Test.csproj" />
+  <Project Path="CritCrit.UnitTests/CritCrit.UnitTests.csproj" />
 </Solution>

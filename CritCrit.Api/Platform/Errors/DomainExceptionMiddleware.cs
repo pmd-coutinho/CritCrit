@@ -1,4 +1,4 @@
-namespace CritCrit.Api.Org.Infrastructure;
+namespace CritCrit.Api.Platform.Errors;
 
 public sealed class DomainExceptionMiddleware(RequestDelegate next)
 {

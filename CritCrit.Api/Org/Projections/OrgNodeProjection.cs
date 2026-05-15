@@ -2,6 +2,7 @@ using CritCrit.Api.Org.Domain;
 using Marten;
 using Marten.Events;
 using Marten.Events.Projections;
+using Marten.Patching;
 
 namespace CritCrit.Api.Org.Projections;
 
@@ -68,14 +69,23 @@ public sealed class OrgNodeProjection : EventProjection
         var node = await ops.LoadAsync<OrgNodeReadModel>(e.Id.Value, ct);
         if (node is not null)
         {
+            var archivedAncestors = node.AncestorIds.Count == 0
+                ? []
+                : await ops.Query<OrgNodeReadModel>()
+                    .Where(x => x.TenantId == node.TenantId && node.AncestorIds.Contains(x.Id) && x.Archived)
+                    .Select(x => x.Id)
+                    .ToListAsync(ct);
+
             node.Archived = false;
-            node.EffectiveArchived = false;
+            node.EffectiveArchived = archivedAncestors.Count != 0;
             ops.Store(node);
         }
     }
 
     public void Project(OrgNodeHardDeleted e, IDocumentOperations ops)
     {
-        ops.Delete<OrgNodeReadModel>(e.Id.Value);
+        ops.Patch<OrgNodeReadModel>(e.Id.Value)
+            .Set(x => x.HardDeleted, true)
+            .Set(x => x.EffectiveArchived, true);
     }
 }

@@ -1,7 +1,9 @@
+using CritCrit.Api.Org.Auth;
 using CritCrit.Api.Org.Domain;
 using CritCrit.Api.Org.Endpoints;
 using CritCrit.Api.Org.Infrastructure;
 using Marten;
+using Wolverine;
 using Wolverine.Http;
 
 namespace CritCrit.Api.Org.Handlers;
@@ -14,12 +16,13 @@ public static class AccessGrantHandlers
         string brandId,
         IDocumentStore store,
         OrgAuthorizationService authorization,
-        HttpContext httpContext,
+        IMessageBus bus,
+        BrandTenantContext tenant,
+        ActorContext actor,
         CancellationToken ct)
     {
-        var tenant = HandlerContext.GetTenant(httpContext);
-        await using var session = HandlerContext.TenantSession(store, tenant);
-        var actor = await HandlerContext.ResolveActorAsync(httpContext, store, ct);
+        await using var session = SessionFactory.TenantSession(store, tenant);
+        SessionMetadata.StampActor(session, actor);
 
         if (!OrgPublicId.TryParseOrgNode(request.OrgNodeId, out var nodeId, out _))
             throw new DomainException("Invalid org node ID.");
@@ -43,29 +46,206 @@ public static class AccessGrantHandlers
         if (subject is null || !subject.Active)
             throw new DomainException("Subject does not exist or is inactive.");
 
-        if (await authorization.WouldBeRedundantAsync(session, target, subjectId, request.Role, TimeProvider.System.GetUtcNow(), ct))
+        var now = TimeProvider.System.GetUtcNow();
+        if (await authorization.WouldBeRedundantAsync(session, target, subjectId, request.Role, now, ct))
             throw new DomainException("Grant would be redundant with inherited access.");
 
         var id = OrgAccessGrantReadModel.BuildId(tenant.TenantId, nodeId, subjectId);
         var grant = await session.LoadAsync<OrgAccessGrantReadModel>(id, ct);
+        var ownerTransition = request.Role == OrgRole.Owner || grant is { Status: OrgAccessGrantStatus.Active, Role: OrgRole.Owner };
+
+        if (ownerTransition)
+            authorization.EnforceSuperAdmin(actor);
+
         if (grant is { Status: OrgAccessGrantStatus.Active })
         {
-            if (grant.Role == request.Role)
+            if (grant.Role == request.Role && grant.ExpiresAt == request.ExpiresAt)
                 throw new DomainException("Equivalent direct grant already exists.");
 
+            if (request.ExpiresAt != grant.ExpiresAt)
+                throw new DomainException("Changing expiration on an active grant is not allowed through this endpoint. Use /api/brands/{brandId}/access-grants/expiration instead.");
+
             session.Events.Append(grant.StreamId, new OrgAccessRoleChanged(tenant.TenantId, nodeId, subjectId, grant.Role, request.Role));
+
+            if (request.Role == OrgRole.Owner)
+            {
+                AuditLog.Write(session, OrgAuditActions.OwnerGranted, actor, tenant.TenantId.Value, nodeId.Value, null, new
+                {
+                    SubjectId = subject.PublicId,
+                    SubjectEmail = subject.Email,
+                    OldRole = grant.Role.ToString(),
+                    NewRole = request.Role.ToString()
+                });
+            }
+            else if (grant.Role == OrgRole.Owner)
+            {
+                AuditLog.Write(session, OrgAuditActions.OwnerRevoked, actor, tenant.TenantId.Value, nodeId.Value, null, new
+                {
+                    SubjectId = subject.PublicId,
+                    SubjectEmail = subject.Email,
+                    OldRole = grant.Role.ToString(),
+                    NewRole = request.Role.ToString()
+                });
+            }
+
             await session.SaveChangesAsync(ct);
+
+            // Trigger redundant cleanup if upgrading to a stronger role
+            if (request.Role > grant.Role)
+            {
+                await bus.PublishAsync(new CleanupRedundantGrants(tenant.TenantId, nodeId, subjectId, request.Role));
+            }
+
             var updated = await session.LoadAsync<OrgAccessGrantReadModel>(id, ct);
             return Results.Created($"/api/brands/{brandId}/access-grants/{id}",
                 new GrantResponse(updated!.Id, request.OrgNodeId, request.SubjectId, updated.Role, updated.ExpiresAt));
         }
 
         var streamId = Guid.CreateVersion7();
-        session.Events.StartStream<OrgAccessGrantReadModel>(streamId, new OrgAccessGranted(tenant.TenantId, nodeId, subjectId, request.Role, request.ExpiresAt, OrgAccessGrantSource.DirectGrant, null));
+        session.Events.StartStream<OrgAccessGrantReadModel>(streamId,
+            new OrgAccessGranted(tenant.TenantId, nodeId, subjectId, request.Role, request.ExpiresAt, OrgAccessGrantSource.DirectGrant, null));
+
+        if (request.Role == OrgRole.Owner)
+        {
+            AuditLog.Write(session, OrgAuditActions.OwnerGranted, actor, tenant.TenantId.Value, nodeId.Value, null, new
+            {
+                SubjectId = subject.PublicId,
+                SubjectEmail = subject.Email,
+                NewRole = request.Role.ToString()
+            });
+        }
+
         await session.SaveChangesAsync(ct);
         var created = await session.LoadAsync<OrgAccessGrantReadModel>(id, ct)
             ?? throw new InvalidOperationException("Projection failed to create OrgAccessGrantReadModel.");
+
+        // Schedule expiration if applicable
+        if (request.ExpiresAt is not null)
+        {
+            await bus.ScheduleAsync(
+                new ExpireGrant(tenant.TenantId, nodeId, subjectId, request.ExpiresAt.Value),
+                request.ExpiresAt.Value.UtcDateTime);
+        }
+
+        // Trigger redundant cleanup for ancestor grants
+        await bus.PublishAsync(new CleanupRedundantGrants(tenant.TenantId, nodeId, subjectId, request.Role));
+
         return Results.Created($"/api/brands/{brandId}/access-grants/{id}",
             new GrantResponse(created.Id, request.OrgNodeId, request.SubjectId, created.Role, created.ExpiresAt));
+    }
+
+    [WolverineGet("/api/brands/{brandId}/access-grants")]
+    public static async Task<IReadOnlyList<GrantListItem>> ListGrants(
+        string brandId,
+        IDocumentStore store,
+        OrgAuthorizationService authorization,
+        BrandTenantContext tenant,
+        ActorContext actor,
+        CancellationToken ct)
+    {
+        await using var tenantSession = SessionFactory.TenantSession(store, tenant);
+
+        var brandNode = await OrgValidation.LoadNodeAsync(tenantSession, tenant.TenantId, ct);
+        if (brandNode.HardDeleted)
+            throw new DomainException("Brand not found.", 404);
+
+        // Visibility: SuperAdmin or Admin+ at brand root.
+        if (!actor.IsSuperAdmin)
+            await authorization.EnforceRoleAsync(tenantSession, actor, brandNode, OrgRole.Admin, ct);
+
+        var grants = await tenantSession.Query<OrgAccessGrantReadModel>()
+            .Where(x => x.TenantId == tenant.TenantId.Value && x.Status == OrgAccessGrantStatus.Active)
+            .ToListAsync(ct);
+
+        if (grants.Count == 0)
+            return [];
+
+        var nodeIds = grants.Select(g => g.OrgNodeId).Distinct().ToArray();
+        var subjectIds = grants.Select(g => g.SubjectId).Distinct().ToArray();
+
+        var nodes = (await tenantSession.Query<OrgNodeReadModel>()
+                .Where(n => nodeIds.Contains(n.Id))
+                .ToListAsync(ct))
+            .ToDictionary(n => n.Id);
+
+        await using var platform = store.QuerySession();
+        var subjects = (await platform.Query<SubjectReadModel>()
+                .Where(s => subjectIds.Contains(s.Id))
+                .ToListAsync(ct))
+            .ToDictionary(s => s.Id);
+
+        return grants
+            .Select(g =>
+            {
+                if (!nodes.TryGetValue(g.OrgNodeId, out var node)) return null;
+                if (!subjects.TryGetValue(g.SubjectId, out var subject)) return null;
+                return new GrantListItem(
+                    g.Id,
+                    node.PublicId,
+                    node.Name,
+                    node.Type,
+                    subject.PublicId,
+                    subject.Email,
+                    subject.DisplayName,
+                    g.Role,
+                    g.ExpiresAt,
+                    g.Source);
+            })
+            .Where(x => x is not null)
+            .Select(x => x!)
+            .OrderByDescending(x => x.Role)
+            .ThenBy(x => x.OrgNodeName)
+            .ToArray();
+    }
+
+    [WolverinePost("/api/brands/{brandId}/access-grants/expiration")]
+    public static async Task<GrantResponse> SetGrantExpiration(
+        SetGrantExpirationRequest request,
+        string brandId,
+        IDocumentStore store,
+        OrgAuthorizationService authorization,
+        IMessageBus bus,
+        BrandTenantContext tenant,
+        ActorContext actor,
+        CancellationToken ct)
+    {
+        await using var session = SessionFactory.TenantSession(store, tenant);
+        SessionMetadata.StampActor(session, actor);
+
+        if (!OrgPublicId.TryParseOrgNode(request.OrgNodeId, out var nodeId, out _))
+            throw new DomainException("Invalid org node ID.");
+        if (!OrgPublicId.TryParseSubject(request.SubjectId, out var subjectId))
+            throw new DomainException("Invalid subject ID.");
+
+        var target = await OrgValidation.LoadNodeAsync(session, nodeId, ct);
+        if (target.TenantId != tenant.TenantId.Value)
+            throw new DomainException("Org node does not belong to the requested brand tenant.");
+        if (target.HardDeleted || target.EffectiveArchived)
+            throw new DomainException("Cannot modify access for inactive org nodes.");
+
+        await authorization.EnforceRoleAsync(session, actor, target, OrgRole.Admin, ct);
+
+        var id = OrgAccessGrantReadModel.BuildId(tenant.TenantId, nodeId, subjectId);
+        var grant = await session.LoadAsync<OrgAccessGrantReadModel>(id, ct);
+        if (grant is not { Status: OrgAccessGrantStatus.Active })
+            throw new DomainException("Active grant not found.");
+
+        var oldExpiresAt = grant.ExpiresAt;
+        session.Events.Append(grant.StreamId,
+            new OrgAccessExpirationChanged(tenant.TenantId, nodeId, subjectId, oldExpiresAt, request.ExpiresAt));
+
+        await session.SaveChangesAsync(ct);
+
+        // Schedule or cancel expiration
+        if (request.ExpiresAt is not null)
+        {
+            await bus.ScheduleAsync(
+                new ExpireGrant(tenant.TenantId, nodeId, subjectId, request.ExpiresAt.Value),
+                request.ExpiresAt.Value.UtcDateTime);
+        }
+
+        var updated = await session.LoadAsync<OrgAccessGrantReadModel>(id, ct)
+            ?? throw new InvalidOperationException("Projection failed to update OrgAccessGrantReadModel.");
+        return new GrantResponse(updated.Id, request.OrgNodeId, request.SubjectId, updated.Role, updated.ExpiresAt);
     }
 }

@@ -1,4 +1,4 @@
-namespace CritCrit.Api.Org.Auth;
+namespace CritCrit.Api.Platform.Auth;
 
 public sealed record AuthorizationResult(bool Succeeded, string? Error = null)
 {

@@ -51,3 +51,17 @@ public enum OrgAccessRevokedReason
     TargetHardDeleted,
     SubjectDisabled
 }
+
+public enum InvitationStatus
+{
+    Requested,
+    Provisioning,
+    Pending,
+    Accepted,
+    AutoApplied,
+    Cancelled,
+    Superseded,
+    Expired,
+    Obsolete,
+    Failed
+}

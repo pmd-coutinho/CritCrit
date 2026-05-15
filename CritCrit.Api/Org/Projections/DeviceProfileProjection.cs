@@ -2,6 +2,7 @@ using CritCrit.Api.Org.Domain;
 using Marten;
 using Marten.Events;
 using Marten.Events.Projections;
+using Marten.Patching;
 
 namespace CritCrit.Api.Org.Projections;
 
@@ -22,6 +23,7 @@ public sealed class DeviceProfileProjection : EventProjection
 
     public void Project(DeviceProfileHardDeleted e, IDocumentOperations ops)
     {
-        ops.Delete<DeviceProfileReadModel>(e.DeviceId.Value);
+        ops.Patch<DeviceProfileReadModel>(e.DeviceId.Value)
+            .Set(x => x.HardDeleted, true);
     }
 }

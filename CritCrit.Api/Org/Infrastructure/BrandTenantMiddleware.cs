@@ -1,4 +1,5 @@
 using CritCrit.Api.Org.Domain;
+using CritCrit.Api.Platform.Tenancy;
 using Marten;
 
 namespace CritCrit.Api.Org.Infrastructure;
@@ -19,7 +20,12 @@ public sealed class BrandTenantMiddleware(RequestDelegate next)
             var root = await session.LoadAsync<OrgNodeReadModel>(tenantId.Value, context.RequestAborted);
             if (root is null || root.Type != OrgNodeType.Brand || root.TenantId != tenantId.Value || root.HardDeleted)
             {
-                context.Response.StatusCode = StatusCodes.Status404NotFound;
+                // Check tombstone to distinguish hard-deleted from unknown
+                await using var platformSession = store.QuerySession();
+                var tombstone = await platformSession.LoadAsync<BrandTombstone>(tenantId.Value, context.RequestAborted);
+                context.Response.StatusCode = tombstone is not null
+                    ? StatusCodes.Status410Gone
+                    : StatusCodes.Status404NotFound;
                 return;
             }
 
@@ -59,7 +65,3 @@ public sealed class BrandTenantMiddleware(RequestDelegate next)
     }
 }
 
-public sealed record BrandTenantContext(OrgNodeId TenantId, string BrandPublicId)
-{
-    public const string ItemKey = "BrandTenantContext";
-}

@@ -8,13 +8,36 @@ Model a brand-scoped org hierarchy on Marten with roles, inheritance, invitation
 
 - Brand is the tenant root.
 - Brand public id is the Marten/Wolverine tenant id.
+- Tenant-scoped routes use Wolverine HTTP handlers, with middleware only for tenant resolution and archived-brand gating.
 - Org nodes use typed UUIDv7-based public ids.
 - Code-defined hierarchy rules exist.
 - Fixed roles exist: `Owner`, `Admin`, `Member`, `Viewer`.
 - Subject provisioning exists as internal identity records.
+- Invitation onboarding exists with a Wolverine-backed provisioning workflow.
 - Direct grants exist with one role per subject per node.
 - Redundant grant creation is rejected.
-- Alba tests cover the initial happy path and core hierarchy/access invariants.
+- Org lifecycle commands exist: move, archive, restore, and hard delete.
+- Brand archive/restore now requires `Owner` or `SuperAdmin`.
+- Hard delete now behaves as app-level hard delete:
+  - `OrgNodeReadModel`, `StoreProfileReadModel`, `DeviceProfileReadModel`, and `OrgNodeCodeIndex` are marked `HardDeleted`
+  - hard-deleted nodes are hidden from normal reads
+  - active grants in the deleted subtree are revoked with `TargetHardDeleted`
+  - Brand root hard delete creates a tenant-neutral tombstone
+- Immutable audit events are persisted for:
+  - hard delete
+  - forced subtree archive
+  - Brand archive
+  - Brand restore
+  - move
+  - owner grant / owner downgrade
+- Event writes are stamped with actor metadata through Marten session metadata and headers.
+- Alba coverage now includes lifecycle, authorization edge cases, and immutable audit assertions.
+- Alba coverage now also includes:
+  - invitation creation
+  - acceptance
+  - onboarded-subject rejection
+  - pending invitation supersede
+  - first-accept auto-apply
 
 ## Current Domain Decisions
 
@@ -24,84 +47,62 @@ Model a brand-scoped org hierarchy on Marten with roles, inheritance, invitation
 - `Owner` is root Brand only.
 - `SuperAdmin` comes from the identity provider live.
 - `Brand` archive/hard-delete rules are sensitive operations and require audit.
+- `Brand` archive/restore is owner-level, not admin-level.
 - `Country` and `Franchise` are plain org nodes for now.
 - `Store` and `Device` are special node types with required operational data.
 - `Device` nodes are terminal.
 - `Country` codes use ISO alpha-2.
 - All org codes are tenant-wide unique, immutable, and normalized case-insensitively.
+- Hard delete is app-level first; physical purge is deferred.
+- Companion profile lifecycle follows OrgNode lifecycle and cannot be deleted independently.
+- Invitations are onboarding-only:
+  - one subject per normalized email
+  - one active pending invitation per email + node
+  - new invite for the same email + node supersedes the previous pending invite
+  - first accepted invitation marks the subject onboarded
+  - later invite attempts for onboarded subjects are rejected
+  - remaining pending invitations for that subject auto-apply on first acceptance
 
 ## Remaining Work
 
-### 1. Replace Middleware Edge With Cleaner Routing
-
-- Decide whether to keep the current middleware-based API edge or convert org routes back to Wolverine HTTP handlers.
-- If Wolverine HTTP is kept, make response and DI binding explicit and testable under Alba.
-- If middleware stays, remove unused Wolverine endpoint artifacts and keep the org API surface centralized.
-
-### 2. Org Lifecycle Commands
-
-- Implement `MoveOrgNode`.
-- Implement `ArchiveOrgNode` with force-confirmed cascading behavior.
-- Implement `RestoreOrgNode`.
-- Implement app-level hard delete for org subtrees.
-- Add explicit handling for Brand root archive/restore/hard delete.
-
-### 3. Profile Lifecycle
-
-- Decide the final write-model strategy for `StoreProfile` and `DeviceProfile`.
-- Reintroduce separate event streams only if stream identity strategy supports it cleanly.
-- Keep profile lifecycle subordinate to OrgNode lifecycle.
-- Add profile archive/hard-delete behavior to match org subtree lifecycle.
-
-### 4. Invitations
-
-- Add invitation saga for onboarding.
-- Invitation should target exactly one node and one role.
-- Invitation should provision the IDP user if needed.
-- Invitation should create internal `Subject` and `ExternalIdentityRef`.
-- Invitation acceptance should require IDP auth.
-- Invitation should grant access immediately on acceptance.
-- Invitation expiry should be 1 day.
-- Invite emails should be sent via a separate notification message/component.
-
-### 5. Cleanup Processors
+### 1. Cleanup Processors
 
 - Add a background processor for expired invitations.
 - Add a background processor for expired grants.
 - Add a background processor for redundant grants after ancestor grants, moves, and role changes.
 - Cleanup should revoke, not hard-delete, expired/redundant grants.
 
-### 6. Audit
+### 2. Audit Read Surface
 
-- Add tenant-neutral immutable audit log.
-- Persist sensitive operations there:
-  - hard delete
-  - forced cascade archive
-  - Brand archive/restore
-  - Owner grant/revoke
-  - move operations
-- Include actor metadata on normal domain events too.
+- Add a tenant-neutral audit query/read API for platform support and admin tooling.
+- Decide which audit events should be visible to Brand owners vs SuperAdmins only.
+- Decide whether to expose event metadata headers in audit/debug endpoints.
 
-### 7. Read Models
+### 3. Owner Lifecycle Completeness
 
-- Materialize ancestor lists and code-based paths.
-- Keep explicit `Archived` and `EffectiveArchived`.
-- Keep `HardDeleted` flags in projections.
-- Add lookup/projection support for tenant-wide code uniqueness and subject identity resolution.
+- Add an explicit revoke/downgrade API if owner removal should become a first-class operation instead of piggybacking on grant role change.
+- Enforce any future “last owner” flow on that dedicated command if the API surface grows.
 
-### 8. Tests
+### 4. Invitation Enhancements
 
-- Expand Alba coverage to:
-  - move validation
-  - archive/restore behavior
-  - hard delete authorization
-  - invitation flow
+- Add explicit invitation expiry test coverage once the scheduled processor is exercised deterministically in Alba.
+- Decide whether notification retries should stay immediate/local or move to delayed scheduled retries.
+- Decide whether invitation emails should use a configured public base URL instead of the current API-relative accept link.
+- Decide whether to expose invitation resend/cancel actions in immutable audit read endpoints.
+
+### 5. Testing
+
+- Add Alba coverage for:
   - expired/redundant grant cleanup
   - Brand tombstone behavior
-- Keep tests running against the real API with Testcontainers Postgres.
+  - audit query endpoints once they exist
 
-## Open Design Question
+## Current Notes
 
-- Whether the org API should remain middleware-driven or be moved back onto Wolverine HTTP handlers.
-- Current implementation uses middleware because it was the fastest path to deterministic Alba-tested behavior.
-
+- The org API already runs on Wolverine HTTP handlers; this is no longer an open routing question.
+- Tenant resolution remains middleware-based because it must happen before the tenant-scoped Marten session is opened.
+- `StoreProfileCreated` and `DeviceProfileCreated` currently append to the same OrgNode stream id. That is acceptable for now; separate profile streams are optional future refactoring, not a blocker.
+- Invitation provisioning uses a provider-neutral abstraction:
+  - `InMemoryIdentityProviderProvisioning` in Alba/tests
+  - `KeycloakIdentityProviderProvisioning` for local/dev
+- Mailpit is now wired through Aspire and referenced by the API for local invitation-email testing.

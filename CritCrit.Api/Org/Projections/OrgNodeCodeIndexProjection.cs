@@ -2,6 +2,7 @@ using CritCrit.Api.Org.Domain;
 using Marten;
 using Marten.Events;
 using Marten.Events.Projections;
+using Marten.Patching;
 
 namespace CritCrit.Api.Org.Projections;
 
@@ -24,7 +25,8 @@ public sealed class OrgNodeCodeIndexProjection : EventProjection
         if (node is not null)
         {
             var id = OrgNodeCodeIndex.BuildId(new OrgNodeId(node.TenantId), node.CodeNormalized);
-            ops.Delete<OrgNodeCodeIndex>(id);
+            ops.Patch<OrgNodeCodeIndex>(id)
+                .Set(x => x.HardDeleted, true);
         }
     }
 }

@@ -46,4 +46,11 @@ public sealed class GrantProjection : EventProjection
         ops.Patch<OrgAccessGrantReadModel>(id)
             .Set(x => x.Status, OrgAccessGrantStatus.Expired);
     }
+
+    public void Project(OrgAccessExpirationChanged e, IDocumentOperations ops)
+    {
+        var id = OrgAccessGrantReadModel.BuildId(e.TenantId, e.OrgNodeId, e.SubjectId);
+        ops.Patch<OrgAccessGrantReadModel>(id)
+            .Set(x => x.ExpiresAt, e.NewExpiresAt);
+    }
 }

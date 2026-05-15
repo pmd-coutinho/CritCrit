@@ -6,6 +6,9 @@ using Wolverine;
 
 namespace CritCrit.Test.Fixtures;
 
+[CollectionDefinition("integration")]
+public class IntegrationCollection : ICollectionFixture<ApiFixture>;
+
 public class ApiFixture : IAsyncLifetime
 {
     private PostgreSqlContainer _postgreSqlContainer = null!;
