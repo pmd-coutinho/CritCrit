@@ -92,13 +92,48 @@ export interface AcceptInvitationResponse {
 export interface AuditEventResponse {
   id: string;
   action: string;
+  category: string;
+  severity: string;
   occurredAt: string;
   reason: string | null;
   actorExternalId: string;
   actorSubjectId: string | null;
+  actorSubjectPublicId: string | null;
+  actorKind: string;
   tenantId: string | null;
+  tenantPublicId: string | null;
   targetOrgNodeId: string | null;
+  targetPublicId: string | null;
+  targetType: string | null;
+  targetLabel: string | null;
+  subjectId: string | null;
+  subjectPublicId: string | null;
+  supportId: string | null;
+  correlationId: string | null;
+  causationId: string | null;
+  relatedResources: AuditResourceRef[];
+  changes: AuditFieldChange[];
+  request: AuditRequestMetadata | null;
   details: unknown;
+}
+
+export interface AuditResourceRef {
+  type: string;
+  id: string | null;
+  publicId: string | null;
+  label: string | null;
+}
+
+export interface AuditFieldChange {
+  field: string;
+  oldValue: unknown;
+  newValue: unknown;
+}
+
+export interface AuditRequestMetadata {
+  method: string | null;
+  path: string | null;
+  route: string | null;
 }
 
 export interface CreateInvitationRequest {
@@ -328,11 +363,15 @@ export interface paths {
       parameters: {
         query?: {
           action?: string;
+          category?: string;
+          severity?: string;
           from?: string;
           to?: string;
           targetOrgNodeId?: string;
+          subjectId?: string;
           actorExternalId?: string;
           tenantId?: string;
+          supportId?: string;
           limit?: number;
           offset?: number;
         };
@@ -449,10 +488,14 @@ export interface paths {
         path: { brandId: string };
         query?: {
           action?: string;
+          category?: string;
+          severity?: string;
           from?: string;
           to?: string;
           targetOrgNodeId?: string;
+          subjectId?: string;
           actorExternalId?: string;
+          supportId?: string;
           limit?: number;
           offset?: number;
         };

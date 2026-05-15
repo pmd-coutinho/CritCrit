@@ -163,7 +163,8 @@ public sealed record InvitationObsoleted(
 public sealed record InvitationFailed(
     InvitationId Id,
     DateTimeOffset FailedAt,
-    string Failure);
+    string FailureCode,
+    string FailureSummary);
 
 public sealed record InvitationEmailDispatched(
     InvitationId Id,

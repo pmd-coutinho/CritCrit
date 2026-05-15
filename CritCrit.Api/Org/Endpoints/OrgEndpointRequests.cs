@@ -124,12 +124,28 @@ public sealed record AcceptInvitationResponse(
 public sealed record AuditEventResponse(
     Guid Id,
     string Action,
+    string Category,
+    string Severity,
     DateTimeOffset OccurredAt,
     string? Reason,
     string ActorExternalId,
     Guid? ActorSubjectId,
+    string? ActorSubjectPublicId,
+    string ActorKind,
     Guid? TenantId,
+    string? TenantPublicId,
     Guid? TargetOrgNodeId,
+    string? TargetPublicId,
+    string? TargetType,
+    string? TargetLabel,
+    Guid? SubjectId,
+    string? SubjectPublicId,
+    string? SupportId,
+    string? CorrelationId,
+    string? CausationId,
+    IReadOnlyList<AuditResourceRef> RelatedResources,
+    IReadOnlyList<AuditFieldChange> Changes,
+    AuditRequestMetadata? Request,
     object? Details);
 
 public sealed record ArchiveOrgNodeRequest(bool Force, string? Reason);

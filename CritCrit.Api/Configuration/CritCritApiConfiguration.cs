@@ -6,10 +6,14 @@ using CritCrit.Api.Org.Identity;
 using CritCrit.Api.Org.Infrastructure;
 using CritCrit.Api.Org.Invitations;
 using CritCrit.Api.Org.Projections;
+using CritCrit.Api.Observability.Audit;
+using CritCrit.Api.Observability.Support;
+using CritCrit.Api.Observability.Telemetry;
 using JasperFx.Core;
 using JasperFx.Events;
 using JasperFx.Events.Projections;
 using Marten;
+using Marten.Services;
 using Marten.Storage;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.OpenApi;
@@ -34,6 +38,7 @@ public static class CritCritApiConfiguration
         });
 
         builder.AddServiceDefaults();
+        builder.Services.AddCritCritObservability();
         builder.Services.AddCritCritOpenApi(builder.Configuration);
         builder.Services.AddCritCritPersistence(builder.Configuration);
         builder.Services.AddCritCritMessaging();
@@ -53,11 +58,13 @@ public static class CritCritApiConfiguration
         app.UseHttpsRedirection();
         app.UseCors();
         app.MapDefaultEndpoints();
+        app.UseMiddleware<SupportIdMiddleware>();
         app.UseAuthentication();
         app.UseAuthorization();
         app.UseMiddleware<DomainExceptionMiddleware>();
         app.UseMiddleware<RequestActorMiddleware>();
         app.UseMiddleware<BrandTenantMiddleware>();
+        app.UseMiddleware<WolverineHttpTraceMiddleware>();
         app.MapCritCritWolverineEndpoints();
 
         return app;
@@ -104,6 +111,8 @@ public static class CritCritApiConfiguration
             {
                 m.Connection(configuration.GetConnectionString("marten")!);
                 m.DisableNpgsqlLogging = true;
+                m.OpenTelemetry.TrackConnections = TrackLevel.Normal;
+                m.OpenTelemetry.TrackEventCounters();
 
                 ConfigureDocumentStorage(m);
                 ConfigureEventStore(m);
@@ -161,8 +170,15 @@ public static class CritCritApiConfiguration
         m.Schema.For<ImmutableAuditEvent>()
             .SingleTenanted()
             .Index(x => x.Action)
+            .Index(x => x.Category)
+            .Index(x => x.Severity)
             .Index(x => x.TenantId)
-            .Index(x => x.TargetOrgNodeId);
+            .Index(x => x.TargetOrgNodeId)
+            .Index(x => x.SubjectId)
+            .Index(x => x.ActorExternalId)
+            .Index(x => x.ActorSubjectId)
+            .Index(x => x.SupportId)
+            .Index(x => x.OccurredAt);
         m.Schema.For<InvitationReadModel>()
             .SingleTenanted()
             .Index(x => x.TenantId)
@@ -182,11 +198,23 @@ public static class CritCritApiConfiguration
     private static void ConfigureEventStore(StoreOptions m)
     {
         m.Events.AppendMode = EventAppendMode.QuickWithServerTimestamps;
+        m.Events.MetadataConfig.HeadersEnabled = true;
+        m.Events.MetadataConfig.CausationIdEnabled = true;
+        m.Events.MetadataConfig.CorrelationIdEnabled = true;
+        m.Events.MetadataConfig.UserNameEnabled = true;
         m.Events.UseArchivedStreamPartitioning = true;
         m.Events.EnableAdvancedAsyncTracking = true;
         m.Events.EnableEventSkippingInProjectionsOrSubscriptions = true;
         m.Events.UseIdentityMapForAggregates = true;
         m.Events.UseMandatoryStreamTypeDeclaration = true;
+    }
+
+    private static IServiceCollection AddCritCritObservability(this IServiceCollection services)
+    {
+        services.AddHttpContextAccessor();
+        services.AddSingleton(TimeProvider.System);
+        services.AddScoped<IAuditWriter, AuditWriter>();
+        return services;
     }
 
     private static void ConfigureProjections(StoreOptions m)
@@ -219,6 +247,9 @@ public static class CritCritApiConfiguration
             opts.Durability.OutboxStaleTime = 10.Minutes();
             opts.EnableAutomaticFailureAcks = false;
             opts.UnknownMessageBehavior = UnknownMessageBehavior.DeadLetterQueue;
+            opts.Metrics.Mode = WolverineMetricsMode.SystemDiagnosticsMeter;
+            opts.Tracking.HandlerExecutionDiagnosticsEnabled = true;
+            opts.Tracking.OutboxDiagnosticsEnabled = true;
             opts.UseFluentValidation();
             opts.UseFluentValidationProblemDetail();
         });

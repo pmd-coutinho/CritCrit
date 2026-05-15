@@ -19,7 +19,7 @@ describe("query keys", () => {
     expect(keys.tree("br_1")).toEqual(["tree", "br_1"]);
     expect(keys.invitations("br_2")).toEqual(["invitations", "br_2"]);
     expect(keys.grants("br_3")).toEqual(["grants", "br_3"]);
-    expect(keys.audit("br_4", 100)).toEqual(["audit", "br_4", 100]);
+    expect(keys.audit("br_4", {}, 100)).toEqual(["audit", "br_4", {}, 100]);
   });
 
   it("namespaces platform-scoped resources without a brand id", () => {

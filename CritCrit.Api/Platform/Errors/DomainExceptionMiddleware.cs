@@ -11,7 +11,16 @@ public sealed class DomainExceptionMiddleware(RequestDelegate next)
         catch (DomainException ex)
         {
             context.Response.StatusCode = ex.StatusCode;
-            await context.Response.WriteAsJsonAsync(new { error = ex.Message }, context.RequestAborted);
+            context.Response.Headers[SupportId.HeaderName] = SupportId.Current;
+            await context.Response.WriteAsJsonAsync(new
+            {
+                type = $"https://httpstatuses.com/{ex.StatusCode}",
+                title = ex.Message,
+                status = ex.StatusCode,
+                detail = ex.Message,
+                error = ex.Message,
+                supportId = SupportId.Current
+            }, context.RequestAborted);
         }
     }
 }

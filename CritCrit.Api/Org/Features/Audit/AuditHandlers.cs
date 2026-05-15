@@ -12,11 +12,15 @@ public static class AuditHandlers
     [WolverineGet("/api/platform/audit")]
     public static async Task<IResult> GetPlatformAudit(
         string? action,
+        string? category,
+        string? severity,
         DateTimeOffset? from,
         DateTimeOffset? to,
-        Guid? targetOrgNodeId,
+        string? targetOrgNodeId,
+        string? subjectId,
         string? actorExternalId,
-        Guid? tenantId,
+        string? tenantId,
+        string? supportId,
         int? limit,
         int? offset,
         IDocumentStore store,
@@ -31,16 +35,33 @@ public static class AuditHandlers
 
         if (!string.IsNullOrWhiteSpace(action))
             query = query.Where(x => x.Action == action);
+        if (!string.IsNullOrWhiteSpace(category))
+            query = query.Where(x => x.Category == category);
+        if (!string.IsNullOrWhiteSpace(severity))
+            query = query.Where(x => x.Severity == severity);
         if (from is not null)
             query = query.Where(x => x.OccurredAt >= from.Value);
         if (to is not null)
             query = query.Where(x => x.OccurredAt <= to.Value);
-        if (targetOrgNodeId is not null)
-            query = query.Where(x => x.TargetOrgNodeId == targetOrgNodeId.Value);
+        if (!string.IsNullOrWhiteSpace(targetOrgNodeId))
+        {
+            var parsed = ParseOrgNodeFilter(targetOrgNodeId).Value;
+            query = query.Where(x => x.TargetOrgNodeId == parsed);
+        }
+        if (!string.IsNullOrWhiteSpace(subjectId))
+        {
+            var parsed = ParseSubjectFilter(subjectId).Value;
+            query = query.Where(x => x.SubjectId == parsed);
+        }
         if (!string.IsNullOrWhiteSpace(actorExternalId))
             query = query.Where(x => x.ActorExternalId == actorExternalId);
-        if (tenantId is not null)
-            query = query.Where(x => x.TenantId == tenantId.Value);
+        if (!string.IsNullOrWhiteSpace(tenantId))
+        {
+            var parsed = ParseOrgNodeFilter(tenantId).Value;
+            query = query.Where(x => x.TenantId == parsed);
+        }
+        if (!string.IsNullOrWhiteSpace(supportId))
+            query = query.Where(x => x.SupportId == supportId);
 
         var take = Math.Min(limit ?? 50, 200);
         var skip = offset ?? 0;
@@ -51,16 +72,7 @@ public static class AuditHandlers
             .Take(take)
             .ToListAsync(ct);
 
-        var responses = items.Select(x => new AuditEventResponse(
-            x.Id,
-            x.Action,
-            x.OccurredAt,
-            x.Reason,
-            x.ActorExternalId,
-            x.ActorSubjectId,
-            x.TenantId,
-            x.TargetOrgNodeId,
-            x.Details)).ToList();
+        var responses = items.Select(ToResponse).ToList();
 
         return Results.Ok(responses);
     }
@@ -69,10 +81,14 @@ public static class AuditHandlers
     public static async Task<IResult> GetBrandAudit(
         string brandId,
         string? action,
+        string? category,
+        string? severity,
         DateTimeOffset? from,
         DateTimeOffset? to,
         string? targetOrgNodeId,
+        string? subjectId,
         string? actorExternalId,
+        string? supportId,
         int? limit,
         int? offset,
         IDocumentStore store,
@@ -95,14 +111,28 @@ public static class AuditHandlers
 
         if (!string.IsNullOrWhiteSpace(action))
             query = query.Where(x => x.Action == action);
+        if (!string.IsNullOrWhiteSpace(category))
+            query = query.Where(x => x.Category == category);
+        if (!string.IsNullOrWhiteSpace(severity))
+            query = query.Where(x => x.Severity == severity);
         if (from is not null)
             query = query.Where(x => x.OccurredAt >= from.Value);
         if (to is not null)
             query = query.Where(x => x.OccurredAt <= to.Value);
-        if (!string.IsNullOrWhiteSpace(targetOrgNodeId) && OrgPublicId.TryParseOrgNode(targetOrgNodeId, out var nodeId, out _))
-            query = query.Where(x => x.TargetOrgNodeId == nodeId.Value);
+        if (!string.IsNullOrWhiteSpace(targetOrgNodeId))
+        {
+            var parsed = ParseOrgNodeFilter(targetOrgNodeId).Value;
+            query = query.Where(x => x.TargetOrgNodeId == parsed);
+        }
+        if (!string.IsNullOrWhiteSpace(subjectId))
+        {
+            var parsed = ParseSubjectFilter(subjectId).Value;
+            query = query.Where(x => x.SubjectId == parsed);
+        }
         if (!string.IsNullOrWhiteSpace(actorExternalId))
             query = query.Where(x => x.ActorExternalId == actorExternalId);
+        if (!string.IsNullOrWhiteSpace(supportId))
+            query = query.Where(x => x.SupportId == supportId);
 
         var take = Math.Min(limit ?? 50, 200);
         var skip = offset ?? 0;
@@ -113,17 +143,53 @@ public static class AuditHandlers
             .Take(take)
             .ToListAsync(ct);
 
-        var responses = items.Select(x => new AuditEventResponse(
-            x.Id,
-            x.Action,
-            x.OccurredAt,
-            x.Reason,
-            x.ActorExternalId,
-            x.ActorSubjectId,
-            x.TenantId,
-            x.TargetOrgNodeId,
-            x.Details)).ToList();
+        var responses = items.Select(ToResponse).ToList();
 
         return Results.Ok(responses);
+    }
+
+    private static AuditEventResponse ToResponse(ImmutableAuditEvent x) => new(
+        x.Id,
+        x.Action,
+        x.Category,
+        x.Severity,
+        x.OccurredAt,
+        x.Reason,
+        x.ActorExternalId,
+        x.ActorSubjectId,
+        x.ActorSubjectPublicId,
+        x.ActorKind,
+        x.TenantId,
+        x.TenantPublicId,
+        x.TargetOrgNodeId,
+        x.Target?.PublicId,
+        x.Target?.Type,
+        x.Target?.Label,
+        x.SubjectId,
+        x.SubjectPublicId,
+        x.SupportId,
+        x.CorrelationId,
+        x.CausationId,
+        x.RelatedResources,
+        x.Changes,
+        x.Request,
+        x.Details);
+
+    private static OrgNodeId ParseOrgNodeFilter(string value)
+    {
+        if (OrgPublicId.TryParseOrgNode(value, out var publicId, out _))
+            return publicId;
+        if (Guid.TryParse(value, out var guid))
+            return new OrgNodeId(guid);
+        throw new DomainException("Invalid org node ID filter.");
+    }
+
+    private static SubjectId ParseSubjectFilter(string value)
+    {
+        if (OrgPublicId.TryParseSubject(value, out var publicId))
+            return publicId;
+        if (Guid.TryParse(value, out var guid))
+            return new SubjectId(guid);
+        throw new DomainException("Invalid subject ID filter.");
     }
 }

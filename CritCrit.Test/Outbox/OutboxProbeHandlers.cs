@@ -1,4 +1,4 @@
-using CritCrit.Api.Platform.Audit;
+using CritCrit.Api.Observability.Audit;
 using Marten;
 using Wolverine;
 using Wolverine.Attributes;
@@ -78,6 +78,9 @@ public static class OutboxProbeHandlers
     {
         Id = Guid.CreateVersion7(),
         Action = action,
+        Category = AuditCategories.Org,
+        Severity = AuditSeverities.Info,
+        ActorKind = AuditActorKinds.SystemBackground,
         ActorExternalId = "outbox-probe",
         OccurredAt = TimeProvider.System.GetUtcNow(),
         Details = new { id }

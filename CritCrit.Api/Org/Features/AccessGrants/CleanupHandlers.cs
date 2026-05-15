@@ -1,16 +1,19 @@
 using CritCrit.Api.Org.Domain;
 using CritCrit.Api.Org.Features.Invitations;
+using CritCrit.Api.Org.Infrastructure;
+using CritCrit.Api.Observability.Logging;
 using Marten;
 using Wolverine.Attributes;
 
 namespace CritCrit.Api.Org.Features.AccessGrants;
 
 [WolverineHandler]
-public sealed class CleanupHandlers(IDocumentStore store)
+public sealed class CleanupHandlers(IDocumentStore store, IAuditWriter audit, ILogger<CleanupHandlers> logger)
 {
     public async Task Handle(ExpireGrant command, CancellationToken ct)
     {
         await using var session = store.LightweightSession(command.TenantId.Value.ToString());
+        SessionMetadata.StampSystem(session, AuditActor.BackgroundSystem(), command.Audit?.CausationId);
         var id = OrgAccessGrantReadModel.BuildId(command.TenantId, command.OrgNodeId, command.SubjectId);
         var grant = await session.LoadAsync<OrgAccessGrantReadModel>(id, ct);
         if (grant is null || grant.Status != OrgAccessGrantStatus.Active)
@@ -22,12 +25,25 @@ public sealed class CleanupHandlers(IDocumentStore store)
 
         session.Events.Append(grant.StreamId,
             new OrgAccessExpired(command.TenantId, command.OrgNodeId, command.SubjectId));
+        audit.Record(session, OrgAudit.SystemRecord(
+            OrgAuditActions.GrantExpired,
+            AuditCategories.Access,
+            AuditSeverities.Warn,
+            AuditActor.BackgroundSystem(),
+            command.TenantId.Value,
+            command.OrgNodeId.Value,
+            details: new { command.ExpiresAt },
+            subjectId: command.SubjectId.Value,
+            changes: [new AuditFieldChange("status", OrgAccessGrantStatus.Active.ToString(), OrgAccessGrantStatus.Expired.ToString())],
+            causationId: command.Audit?.CausationId));
         await session.SaveChangesAsync(ct);
+        logger.AccessGrantExpired(command.TenantId.Value, command.OrgNodeId.Value, command.SubjectId.Value, SupportId.Current);
     }
 
     public async Task Handle(CleanupRedundantGrants command, CancellationToken ct)
     {
         await using var session = store.LightweightSession(command.TenantId.Value.ToString());
+        SessionMetadata.StampSystem(session, AuditActor.BackgroundSystem(), command.Audit?.CausationId);
         var now = TimeProvider.System.GetUtcNow();
 
         var descendants = await session.Query<OrgNodeReadModel>()
@@ -47,7 +63,7 @@ public sealed class CleanupHandlers(IDocumentStore store)
                         x.Status == OrgAccessGrantStatus.Active)
             .ToListAsync(ct);
 
-        var changed = false;
+        var changed = 0;
         foreach (var grant in redundantGrants.Where(g => g.ExpiresAt is null || g.ExpiresAt > now))
         {
             if (grant.Role <= command.NewRole)
@@ -58,17 +74,31 @@ public sealed class CleanupHandlers(IDocumentStore store)
                         new OrgNodeId(grant.OrgNodeId),
                         command.SubjectId,
                         OrgAccessRevokedReason.RedundantByAncestorGrant));
-                changed = true;
+                changed++;
             }
         }
 
-        if (changed)
+        if (changed > 0)
+        {
+            audit.Record(session, OrgAudit.SystemRecord(
+                OrgAuditActions.GrantRedundantRevoked,
+                AuditCategories.Access,
+                AuditSeverities.Warn,
+                AuditActor.BackgroundSystem(),
+                command.TenantId.Value,
+                command.OrgNodeId.Value,
+                details: new { RevokedGrantCount = changed, NewRole = command.NewRole.ToString() },
+                subjectId: command.SubjectId.Value,
+                causationId: command.Audit?.CausationId));
             await session.SaveChangesAsync(ct);
+            logger.RedundantAccessGrantsCleaned(command.TenantId.Value, command.OrgNodeId.Value, command.SubjectId.Value, changed, SupportId.Current);
+        }
     }
 
     public async Task Handle(CleanupMovedSubtreeGrants command, CancellationToken ct)
     {
         await using var session = store.LightweightSession(command.TenantId.Value.ToString());
+        SessionMetadata.StampSystem(session, AuditActor.BackgroundSystem(), command.Audit?.CausationId);
         var now = TimeProvider.System.GetUtcNow();
 
         // Load the moved node to get its new ancestry
@@ -100,7 +130,7 @@ public sealed class CleanupHandlers(IDocumentStore store)
         var newAncestorIds = movedNode.AncestorIds.ToHashSet();
         newAncestorIds.Add(movedNode.Id);
 
-        var changed = false;
+        var changed = 0;
         foreach (var grant in subtreeGrants.Where(g => g.ExpiresAt is null || g.ExpiresAt > now))
         {
             var grantNode = allNodes.FirstOrDefault(x => x.Id == grant.OrgNodeId);
@@ -136,11 +166,22 @@ public sealed class CleanupHandlers(IDocumentStore store)
                         new OrgNodeId(grant.OrgNodeId),
                         new SubjectId(grant.SubjectId),
                         OrgAccessRevokedReason.RedundantByAncestorGrant));
-                changed = true;
+                changed++;
             }
         }
 
-        if (changed)
+        if (changed > 0)
+        {
+            audit.Record(session, OrgAudit.SystemRecord(
+                OrgAuditActions.GrantRedundantRevoked,
+                AuditCategories.Access,
+                AuditSeverities.Warn,
+                AuditActor.BackgroundSystem(),
+                command.TenantId.Value,
+                command.MovedNodeId.Value,
+                details: new { RevokedGrantCount = changed, Reason = "moved_subtree" },
+                causationId: command.Audit?.CausationId));
             await session.SaveChangesAsync(ct);
+        }
     }
 }

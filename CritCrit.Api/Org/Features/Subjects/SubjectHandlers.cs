@@ -17,6 +17,7 @@ public static class SubjectHandlers
         int? offset,
         IDocumentStore store,
         OrgAuthorizationService authorization,
+        IAuditWriter audit,
         ActorContext actor,
         CancellationToken ct)
     {
@@ -59,6 +60,7 @@ public static class SubjectHandlers
         CreateSubjectRequest request,
         IDocumentStore store,
         OrgAuthorizationService authorization,
+        IAuditWriter audit,
         ActorContext actor,
         CancellationToken ct)
     {
@@ -72,6 +74,21 @@ public static class SubjectHandlers
             new SubjectCreated(id, SubjectKind.User, request.Email.Trim(), request.DisplayName?.Trim()));
         session.Events.Append(id.Value,
             new ExternalIdentityLinked(id, request.Provider, request.ProviderTenant, request.ExternalId));
+        audit.Record(session, OrgAudit.Record(
+            OrgAuditActions.SubjectCreated,
+            AuditCategories.Subject,
+            AuditSeverities.Info,
+            actor,
+            null,
+            null,
+            details: new
+            {
+                SubjectId = OrgPublicId.FormatSubject(id),
+                EmailMasked = AuditIdentity.MaskEmail(request.Email),
+                request.Provider,
+                request.ProviderTenant
+            },
+            subjectId: id.Value));
 
         await session.SaveChangesAsync(ct);
         var subject = await session.LoadAsync<SubjectReadModel>(id.Value, ct)
@@ -88,6 +105,7 @@ public static class SubjectHandlers
         DeactivateSubjectRequest request,
         IDocumentStore store,
         OrgAuthorizationService authorization,
+        IAuditWriter audit,
         ActorContext actor,
         CancellationToken ct)
     {
@@ -108,11 +126,17 @@ public static class SubjectHandlers
         platformSession.Events.Append(subject.Id,
             new SubjectDeactivated(parsedSubjectId, request.Reason, now));
 
-        AuditLog.Write(platformSession, OrgAuditActions.SubjectDeactivated, actor, null, null, request.Reason, new
-        {
-            subject.PublicId,
-            subject.Email
-        });
+        audit.Record(platformSession, OrgAudit.Record(
+            OrgAuditActions.SubjectDeactivated,
+            AuditCategories.Subject,
+            AuditSeverities.Critical,
+            actor,
+            null,
+            null,
+            request.Reason,
+            OrgAudit.SubjectDetails(subject),
+            subjectId: subject.Id,
+            changes: [new AuditFieldChange("active", true, false)]));
 
         // Cascade-revoke every active grant the subject holds across all brands.
         // Uses the cross-tenant SubjectBrandAccess index to find affected tenants
@@ -155,6 +179,7 @@ public static class SubjectHandlers
         ReactivateSubjectRequest request,
         IDocumentStore store,
         OrgAuthorizationService authorization,
+        IAuditWriter audit,
         ActorContext actor,
         CancellationToken ct)
     {
@@ -175,11 +200,17 @@ public static class SubjectHandlers
         session.Events.Append(subject.Id,
             new SubjectReactivated(parsedSubjectId, request.Reason, now));
 
-        AuditLog.Write(session, OrgAuditActions.SubjectReactivated, actor, null, null, request.Reason, new
-        {
-            subject.PublicId,
-            subject.Email
-        });
+        audit.Record(session, OrgAudit.Record(
+            OrgAuditActions.SubjectReactivated,
+            AuditCategories.Subject,
+            AuditSeverities.Info,
+            actor,
+            null,
+            null,
+            request.Reason,
+            OrgAudit.SubjectDetails(subject),
+            subjectId: subject.Id,
+            changes: [new AuditFieldChange("active", false, true)]));
 
         // Deliberately do NOT auto-restore the prior grants. Operators must
         // re-grant or re-invite explicitly so revoke history stays meaningful.
@@ -193,6 +224,7 @@ public static class SubjectHandlers
         RelinkSubjectIdentityRequest request,
         IDocumentStore store,
         OrgAuthorizationService authorization,
+        IAuditWriter audit,
         ActorContext actor,
         CancellationToken ct)
     {
@@ -229,15 +261,23 @@ public static class SubjectHandlers
             request.NewExternalId,
             request.Reason));
 
-        AuditLog.Write(session, OrgAuditActions.SubjectRelinked, actor, null, null, request.Reason, new
-        {
-            subject.PublicId,
-            subject.Email,
-            request.Provider,
-            request.ProviderTenant,
-            request.OldExternalId,
-            request.NewExternalId
-        });
+        audit.Record(session, OrgAudit.Record(
+            OrgAuditActions.SubjectRelinked,
+            AuditCategories.Subject,
+            AuditSeverities.Critical,
+            actor,
+            null,
+            null,
+            request.Reason,
+            OrgAudit.SubjectDetails(subject, new
+            {
+                request.Provider,
+                request.ProviderTenant,
+                request.OldExternalId,
+                request.NewExternalId
+            }),
+            subjectId: subject.Id,
+            changes: [new AuditFieldChange("externalId", request.OldExternalId, request.NewExternalId)]));
 
         await session.SaveChangesAsync(ct);
     }

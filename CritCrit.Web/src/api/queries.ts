@@ -26,23 +26,39 @@ import type {
   SubjectResponse,
 } from "./generated";
 
+export type AuditFilter = {
+  action?: string;
+  category?: string;
+  severity?: string;
+  from?: string;
+  to?: string;
+  tenantId?: string;
+  targetOrgNodeId?: string;
+  subjectId?: string;
+  actorExternalId?: string;
+  supportId?: string;
+};
+
 export const keys = {
   myBrands: () => ["brands"] as const,
   grants: (brandId: string) => ["grants", brandId] as const,
   tree: (brandId: string) => ["tree", brandId] as const,
   invitations: (brandId: string) => ["invitations", brandId] as const,
   acceptInvite: (token: string) => ["accept-invite", token] as const,
-  audit: (brandId: string, limit: number) => ["audit", brandId, limit] as const,
+  audit: (brandId: string, filter: AuditFilter, limit: number) => ["audit", brandId, filter, limit] as const,
   subjects: (filter: string, onboarded: boolean | null, limit: number) =>
     ["subjects", filter, onboarded, limit] as const,
-  platformAudit: (
-    filter: { action?: string; tenantId?: string; actorExternalId?: string },
-    limit: number,
-  ) => ["platform-audit", filter, limit] as const,
+  platformAudit: (filter: AuditFilter, limit: number) => ["platform-audit", filter, limit] as const,
 };
 
-function unwrap<T>(value: { data?: T; error?: unknown }): T {
-  if (value.error || !value.data) throw value.error ?? new Error("Request failed");
+function unwrap<T>(value: { data?: T; error?: unknown; response?: Response }): T {
+  if (value.error || !value.data) {
+    const supportId = value.response?.headers.get("X-CritCrit-Support-Id");
+    if (value.error && typeof value.error === "object" && supportId) {
+      (value.error as Record<string, unknown>).supportId ??= supportId;
+    }
+    throw value.error ?? new Error("Request failed");
+  }
   return value.data;
 }
 
@@ -205,12 +221,13 @@ export function useCreateDevice(brandId: MaybeRefOrGetter<string>) {
   });
 }
 
-export function useBrandAudit(brandId: MaybeRefOrGetter<string>, limit = 100) {
+export function useBrandAudit(brandId: MaybeRefOrGetter<string>, filter: MaybeRefOrGetter<AuditFilter> = {}, limit = 100) {
   return useQuery({
-    queryKey: computed(() => keys.audit(toValue(brandId), limit)),
+    queryKey: computed(() => keys.audit(toValue(brandId), toValue(filter), limit)),
     queryFn: async () => {
+      const query = compactAuditQuery(toValue(filter), limit);
       const res = await api.GET("/api/brands/{brandId}/audit", {
-        params: { path: { brandId: toValue(brandId) }, query: { limit } },
+        params: { path: { brandId: toValue(brandId) }, query },
       });
       return unwrap(res);
     },
@@ -431,21 +448,26 @@ export function useCreateSubject() {
 }
 
 export function usePlatformAudit(
-  filter: MaybeRefOrGetter<{ action?: string; tenantId?: string; actorExternalId?: string }>,
+  filter: MaybeRefOrGetter<AuditFilter>,
   limit = 100,
 ) {
   return useQuery({
     queryKey: computed(() => keys.platformAudit(toValue(filter), limit)),
     queryFn: async () => {
-      const f = toValue(filter);
-      const query: Record<string, unknown> = { limit };
-      if (f.action) query.action = f.action;
-      if (f.tenantId) query.tenantId = f.tenantId;
-      if (f.actorExternalId) query.actorExternalId = f.actorExternalId;
+      const query = compactAuditQuery(toValue(filter), limit);
       const res = await api.GET("/api/platform/audit", { params: { query } });
       return unwrap(res);
     },
   });
+}
+
+function compactAuditQuery(filter: AuditFilter, limit: number) {
+  const query: Record<string, string | number> = { limit };
+  for (const [key, value] of Object.entries(filter)) {
+    const trimmed = typeof value === "string" ? value.trim() : "";
+    if (trimmed) query[key] = trimmed;
+  }
+  return query;
 }
 
 export function useAcceptInvite(token: MaybeRefOrGetter<string>) {

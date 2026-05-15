@@ -18,6 +18,7 @@ public static class OwnerLifecycleHandlers
         IDocumentStore store,
         OrgAuthorizationService authorization,
         IMartenOutbox outbox,
+        IAuditWriter audit,
         BrandTenantContext tenant,
         ActorContext actor,
         CancellationToken ct)
@@ -53,13 +54,18 @@ public static class OwnerLifecycleHandlers
             session.Events.Append(grant.StreamId,
                 new OrgAccessRoleChanged(tenant.TenantId, tenant.TenantId, subjectId, grant.Role, OrgRole.Owner));
 
-            AuditLog.Write(session, OrgAuditActions.OwnerGranted, actor, tenant.TenantId.Value, tenant.TenantId.Value, null, new
-            {
-                SubjectId = subject.PublicId,
-                SubjectEmail = subject.Email,
-                OldRole = grant.Role.ToString(),
-                NewRole = OrgRole.Owner.ToString()
-            });
+            audit.Record(session, OrgAudit.Record(
+                OrgAuditActions.OwnerGranted,
+                AuditCategories.Access,
+                AuditSeverities.Critical,
+                actor,
+                tenant.TenantId.Value,
+                tenant.TenantId.Value,
+                details: new { SubjectId = subject.PublicId, SubjectEmailMasked = AuditIdentity.MaskEmail(subject.Email) },
+                subjectId: subject.Id,
+                changes: [new AuditFieldChange("role", grant.Role.ToString(), OrgRole.Owner.ToString())],
+                targetPublicId: brandId,
+                targetType: "brand"));
 
             await session.SaveChangesAsync(ct);
             var updated = await session.LoadAsync<OrgAccessGrantReadModel>(id, ct);
@@ -70,12 +76,18 @@ public static class OwnerLifecycleHandlers
         session.Events.StartStream<OrgAccessGrantReadModel>(streamId,
             new OrgAccessGranted(tenant.TenantId, tenant.TenantId, subjectId, OrgRole.Owner, null, OrgAccessGrantSource.DirectGrant, null));
 
-        AuditLog.Write(session, OrgAuditActions.OwnerGranted, actor, tenant.TenantId.Value, tenant.TenantId.Value, null, new
-        {
-            SubjectId = subject.PublicId,
-            SubjectEmail = subject.Email,
-            NewRole = OrgRole.Owner.ToString()
-        });
+        audit.Record(session, OrgAudit.Record(
+            OrgAuditActions.OwnerGranted,
+            AuditCategories.Access,
+            AuditSeverities.Critical,
+            actor,
+            tenant.TenantId.Value,
+            tenant.TenantId.Value,
+            details: new { SubjectId = subject.PublicId, SubjectEmailMasked = AuditIdentity.MaskEmail(subject.Email) },
+            subjectId: subject.Id,
+            changes: [new AuditFieldChange("role", null, OrgRole.Owner.ToString())],
+            targetPublicId: brandId,
+            targetType: "brand"));
 
         // Trigger redundant cleanup for the newly granted owner role
         await outbox.PublishAsync(new CleanupRedundantGrants(tenant.TenantId, tenant.TenantId, subjectId, OrgRole.Owner));
@@ -96,6 +108,7 @@ public static class OwnerLifecycleHandlers
         IDocumentStore store,
         OrgAuthorizationService authorization,
         IMartenOutbox outbox,
+        IAuditWriter audit,
         BrandTenantContext tenant,
         ActorContext actor,
         CancellationToken ct)
@@ -123,13 +136,19 @@ public static class OwnerLifecycleHandlers
         session.Events.Append(grant.StreamId,
             new OrgAccessRoleChanged(tenant.TenantId, tenant.TenantId, parsedSubjectId, OrgRole.Owner, request.NewRole));
 
-        AuditLog.Write(session, OrgAuditActions.OwnerDowngraded, actor, tenant.TenantId.Value, tenant.TenantId.Value, request.Reason, new
-        {
-            SubjectId = subject?.PublicId,
-            SubjectEmail = subject?.Email,
-            OldRole = OrgRole.Owner.ToString(),
-            NewRole = request.NewRole.ToString()
-        });
+        audit.Record(session, OrgAudit.Record(
+            OrgAuditActions.OwnerDowngraded,
+            AuditCategories.Access,
+            AuditSeverities.Critical,
+            actor,
+            tenant.TenantId.Value,
+            tenant.TenantId.Value,
+            request.Reason,
+            new { SubjectId = subject?.PublicId, SubjectEmailMasked = AuditIdentity.MaskEmail(subject?.Email) },
+            subjectId: subject?.Id,
+            changes: [new AuditFieldChange("role", OrgRole.Owner.ToString(), request.NewRole.ToString())],
+            targetPublicId: brandId,
+            targetType: "brand"));
 
         // After downgrade, descendant grants that were redundant may no longer be redundant.
         // We do not auto-restore them; explicit re-grant is required.
@@ -150,6 +169,7 @@ public static class OwnerLifecycleHandlers
         string subjectId,
         IDocumentStore store,
         OrgAuthorizationService authorization,
+        IAuditWriter audit,
         BrandTenantContext tenant,
         ActorContext actor,
         CancellationToken ct)
@@ -171,11 +191,18 @@ public static class OwnerLifecycleHandlers
         session.Events.Append(grant.StreamId,
             new OrgAccessRevoked(tenant.TenantId, tenant.TenantId, parsedSubjectId, OrgAccessRevokedReason.UserRequested));
 
-        AuditLog.Write(session, OrgAuditActions.OwnerRevoked, actor, tenant.TenantId.Value, tenant.TenantId.Value, request.Reason, new
-        {
-            SubjectId = subject?.PublicId,
-            SubjectEmail = subject?.Email
-        });
+        audit.Record(session, OrgAudit.Record(
+            OrgAuditActions.OwnerRevoked,
+            AuditCategories.Access,
+            AuditSeverities.Critical,
+            actor,
+            tenant.TenantId.Value,
+            tenant.TenantId.Value,
+            request.Reason,
+            new { SubjectId = subject?.PublicId, SubjectEmailMasked = AuditIdentity.MaskEmail(subject?.Email) },
+            subjectId: subject?.Id,
+            targetPublicId: brandId,
+            targetType: "brand"));
 
         await session.SaveChangesAsync(ct);
         return Results.NoContent();

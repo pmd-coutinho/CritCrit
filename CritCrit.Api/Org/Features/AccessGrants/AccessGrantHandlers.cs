@@ -19,6 +19,7 @@ public static class AccessGrantHandlers
         IDocumentStore store,
         OrgAuthorizationService authorization,
         IMartenOutbox outbox,
+        IAuditWriter audit,
         BrandTenantContext tenant,
         ActorContext actor,
         CancellationToken ct)
@@ -72,23 +73,51 @@ public static class AccessGrantHandlers
 
             if (request.Role == OrgRole.Owner)
             {
-                AuditLog.Write(session, OrgAuditActions.OwnerGranted, actor, tenant.TenantId.Value, nodeId.Value, null, new
-                {
-                    SubjectId = subject.PublicId,
-                    SubjectEmail = subject.Email,
-                    OldRole = grant.Role.ToString(),
-                    NewRole = request.Role.ToString()
-                });
+                audit.Record(session, OrgAudit.Record(
+                    OrgAuditActions.OwnerGranted,
+                    AuditCategories.Access,
+                    AuditSeverities.Critical,
+                    actor,
+                    tenant.TenantId.Value,
+                    nodeId.Value,
+                    details: new { SubjectId = subject.PublicId, SubjectEmailMasked = AuditIdentity.MaskEmail(subject.Email) },
+                    subjectId: subject.Id,
+                    changes: [new AuditFieldChange("role", grant.Role.ToString(), request.Role.ToString())],
+                    targetPublicId: target.PublicId,
+                    targetType: target.Type.ToString().ToLowerInvariant(),
+                    targetLabel: target.Name));
             }
             else if (grant.Role == OrgRole.Owner)
             {
-                AuditLog.Write(session, OrgAuditActions.OwnerRevoked, actor, tenant.TenantId.Value, nodeId.Value, null, new
-                {
-                    SubjectId = subject.PublicId,
-                    SubjectEmail = subject.Email,
-                    OldRole = grant.Role.ToString(),
-                    NewRole = request.Role.ToString()
-                });
+                audit.Record(session, OrgAudit.Record(
+                    OrgAuditActions.OwnerRevoked,
+                    AuditCategories.Access,
+                    AuditSeverities.Critical,
+                    actor,
+                    tenant.TenantId.Value,
+                    nodeId.Value,
+                    details: new { SubjectId = subject.PublicId, SubjectEmailMasked = AuditIdentity.MaskEmail(subject.Email) },
+                    subjectId: subject.Id,
+                    changes: [new AuditFieldChange("role", grant.Role.ToString(), request.Role.ToString())],
+                    targetPublicId: target.PublicId,
+                    targetType: target.Type.ToString().ToLowerInvariant(),
+                    targetLabel: target.Name));
+            }
+            else
+            {
+                audit.Record(session, OrgAudit.Record(
+                    OrgAuditActions.GrantRoleChanged,
+                    AuditCategories.Access,
+                    AuditSeverities.Info,
+                    actor,
+                    tenant.TenantId.Value,
+                    nodeId.Value,
+                    details: new { SubjectId = subject.PublicId, SubjectEmailMasked = AuditIdentity.MaskEmail(subject.Email) },
+                    subjectId: subject.Id,
+                    changes: [new AuditFieldChange("role", grant.Role.ToString(), request.Role.ToString())],
+                    targetPublicId: target.PublicId,
+                    targetType: target.Type.ToString().ToLowerInvariant(),
+                    targetLabel: target.Name));
             }
 
             // Trigger redundant cleanup if upgrading to a stronger role
@@ -110,12 +139,35 @@ public static class AccessGrantHandlers
 
         if (request.Role == OrgRole.Owner)
         {
-            AuditLog.Write(session, OrgAuditActions.OwnerGranted, actor, tenant.TenantId.Value, nodeId.Value, null, new
-            {
-                SubjectId = subject.PublicId,
-                SubjectEmail = subject.Email,
-                NewRole = request.Role.ToString()
-            });
+            audit.Record(session, OrgAudit.Record(
+                OrgAuditActions.OwnerGranted,
+                AuditCategories.Access,
+                AuditSeverities.Critical,
+                actor,
+                tenant.TenantId.Value,
+                nodeId.Value,
+                details: new { SubjectId = subject.PublicId, SubjectEmailMasked = AuditIdentity.MaskEmail(subject.Email) },
+                subjectId: subject.Id,
+                changes: [new AuditFieldChange("role", null, request.Role.ToString())],
+                targetPublicId: target.PublicId,
+                targetType: target.Type.ToString().ToLowerInvariant(),
+                targetLabel: target.Name));
+        }
+        else
+        {
+            audit.Record(session, OrgAudit.Record(
+                OrgAuditActions.GrantCreated,
+                AuditCategories.Access,
+                AuditSeverities.Info,
+                actor,
+                tenant.TenantId.Value,
+                nodeId.Value,
+                details: new { SubjectId = subject.PublicId, SubjectEmailMasked = AuditIdentity.MaskEmail(subject.Email), ExpiresAt = request.ExpiresAt },
+                subjectId: subject.Id,
+                changes: [new AuditFieldChange("role", null, request.Role.ToString())],
+                targetPublicId: target.PublicId,
+                targetType: target.Type.ToString().ToLowerInvariant(),
+                targetLabel: target.Name));
         }
 
         // Schedule expiration if applicable
@@ -144,6 +196,7 @@ public static class AccessGrantHandlers
         string brandId,
         IDocumentStore store,
         OrgAuthorizationService authorization,
+        IAuditWriter audit,
         BrandTenantContext tenant,
         ActorContext actor,
         CancellationToken ct)
@@ -193,12 +246,19 @@ public static class AccessGrantHandlers
         session.Events.Append(grant.StreamId,
             new OrgAccessRevoked(tenant.TenantId, nodeId, subjectId, OrgAccessRevokedReason.UserRequested));
 
-        AuditLog.Write(session, OrgAuditActions.GrantRevoked, actor, tenant.TenantId.Value, nodeId.Value, request.Reason, new
-        {
-            SubjectId = subject?.PublicId,
-            SubjectEmail = subject?.Email,
-            Role = grant.Role.ToString()
-        });
+        audit.Record(session, OrgAudit.Record(
+            OrgAuditActions.GrantRevoked,
+            AuditCategories.Access,
+            AuditSeverities.Warn,
+            actor,
+            tenant.TenantId.Value,
+            nodeId.Value,
+            request.Reason,
+            new { SubjectId = subject?.PublicId, SubjectEmailMasked = AuditIdentity.MaskEmail(subject?.Email), Role = grant.Role.ToString() },
+            subjectId: subject?.Id,
+            targetPublicId: target.PublicId,
+            targetType: target.Type.ToString().ToLowerInvariant(),
+            targetLabel: target.Name));
 
         await session.SaveChangesAsync(ct);
     }
@@ -274,6 +334,7 @@ public static class AccessGrantHandlers
         IDocumentStore store,
         OrgAuthorizationService authorization,
         IMartenOutbox outbox,
+        IAuditWriter audit,
         BrandTenantContext tenant,
         ActorContext actor,
         CancellationToken ct)
@@ -303,6 +364,21 @@ public static class AccessGrantHandlers
         var oldExpiresAt = grant.ExpiresAt;
         session.Events.Append(grant.StreamId,
             new OrgAccessExpirationChanged(tenant.TenantId, nodeId, subjectId, oldExpiresAt, request.ExpiresAt));
+        var subject = await session.LoadAsync<SubjectReadModel>(subjectId.Value, ct);
+
+        audit.Record(session, OrgAudit.Record(
+            OrgAuditActions.GrantExpirationChanged,
+            AuditCategories.Access,
+            AuditSeverities.Info,
+            actor,
+            tenant.TenantId.Value,
+            nodeId.Value,
+            details: new { SubjectId = subject?.PublicId, SubjectEmailMasked = AuditIdentity.MaskEmail(subject?.Email) },
+            subjectId: subject?.Id,
+            changes: [new AuditFieldChange("expiresAt", oldExpiresAt, request.ExpiresAt)],
+            targetPublicId: target.PublicId,
+            targetType: target.Type.ToString().ToLowerInvariant(),
+            targetLabel: target.Name));
 
         // Schedule or cancel expiration
         if (request.ExpiresAt is not null)

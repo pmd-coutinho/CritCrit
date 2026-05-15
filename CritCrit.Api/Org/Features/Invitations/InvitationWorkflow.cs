@@ -1,6 +1,8 @@
 using CritCrit.Api.Org.Domain;
 using CritCrit.Api.Org.Identity;
+using CritCrit.Api.Org.Infrastructure;
 using CritCrit.Api.Org.Invitations;
+using CritCrit.Api.Observability.Logging;
 using Marten;
 using Wolverine;
 using Wolverine.Attributes;
@@ -13,7 +15,9 @@ public sealed class InvitationWorkflow(
     IIdentityProviderProvisioning identityProvider,
     IInvitationEmailSender emailSender,
     InvitationTokenService tokens,
-    IConfiguration configuration)
+    IConfiguration configuration,
+    IAuditWriter audit,
+    ILogger<InvitationWorkflow> logger)
 {
     public async Task Handle(ProvisionInvitation command, IMessageBus bus, CancellationToken ct)
     {
@@ -92,7 +96,7 @@ public sealed class InvitationWorkflow(
 
             await session.SaveChangesAsync(ct);
 
-            await bus.ScheduleAsync(new ExpireInvitation(command.InvitationId, expiresAt), expiresAt.UtcDateTime);
+            await bus.ScheduleAsync(new ExpireInvitation(command.InvitationId, expiresAt, command.Audit), expiresAt.UtcDateTime);
 
             if (providerUser.WasCreated)
             {
@@ -106,16 +110,18 @@ public sealed class InvitationWorkflow(
                     ct);
             }
 
-            await bus.InvokeAsync(new SendInvitationEmail(command.InvitationId, rawToken, providerUser.WasCreated, 1));
+            await bus.InvokeAsync(new SendInvitationEmail(command.InvitationId, providerUser.WasCreated, 1, command.Audit));
         }
         catch (Exception ex) when (ex is not DomainException)
         {
-            session.Events.Append(invitation.Id, new InvitationFailed(command.InvitationId, TimeProvider.System.GetUtcNow(), ex.Message));
+            RecordFailure(session, invitation, command.InvitationId, "provisioning_failed", "Invitation provisioning failed.", command.Audit?.CausationId);
+            logger.InvitationWorkflowFailed(invitation.Id, "provisioning_failed", SupportId.Current);
             await session.SaveChangesAsync(ct);
         }
         catch (DomainException ex)
         {
-            session.Events.Append(invitation.Id, new InvitationFailed(command.InvitationId, TimeProvider.System.GetUtcNow(), ex.Message));
+            RecordFailure(session, invitation, command.InvitationId, "domain_rejected", ex.Message, command.Audit?.CausationId);
+            logger.InvitationWorkflowFailed(invitation.Id, "domain_rejected", SupportId.Current);
             await session.SaveChangesAsync(ct);
         }
     }
@@ -129,10 +135,16 @@ public sealed class InvitationWorkflow(
 
         try
         {
+            var rawToken = tokens.GenerateRawToken();
+            var expiresAt = TimeProvider.System.GetUtcNow().AddDays(1);
+            session.Events.Append(invitation.Id, new InvitationTokenIssued(command.InvitationId, tokens.Hash(rawToken), expiresAt));
+            await session.SaveChangesAsync(ct);
+            await bus.ScheduleAsync(new ExpireInvitation(command.InvitationId, expiresAt, command.Audit), expiresAt.UtcDateTime);
+
             var publicBaseUrl = configuration.GetValue<string>("Invitation:PublicBaseUrl")?.TrimEnd('/') ?? "";
             var acceptUrl = string.IsNullOrEmpty(publicBaseUrl)
-                ? $"/accept-invite?token={Uri.EscapeDataString(command.RawToken)}"
-                : $"{publicBaseUrl}/accept-invite?token={Uri.EscapeDataString(command.RawToken)}";
+                ? $"/accept-invite?token={Uri.EscapeDataString(rawToken)}"
+                : $"{publicBaseUrl}/accept-invite?token={Uri.EscapeDataString(rawToken)}";
 
             var passwordSetupNotice = command.RequiresPasswordSetup
                 ? "Heads up: you should also receive a separate email from Keycloak titled \"Update Password\". " +
@@ -152,10 +164,22 @@ public sealed class InvitationWorkflow(
                 ct);
 
             session.Events.Append(invitation.Id, new InvitationEmailDispatched(command.InvitationId, TimeProvider.System.GetUtcNow()));
+            audit.Record(session, OrgAudit.SystemRecord(
+                OrgAuditActions.InvitationEmailDispatched,
+                AuditCategories.Invitation,
+                AuditSeverities.Info,
+                AuditActor.BackgroundSystem(),
+                invitation.TenantId,
+                invitation.TargetOrgNodeId,
+                details: OrgAudit.InviteDetails(invitation, new { command.Attempt }),
+                subjectId: invitation.SubjectId,
+                causationId: command.Audit?.CausationId));
             await session.SaveChangesAsync(ct);
+            logger.InvitationEmailDispatched(invitation.Id, command.Attempt, SupportId.Current);
         }
-        catch (Exception) when (command.Attempt < 3)
+        catch (Exception ex) when (command.Attempt < 3)
         {
+            logger.InvitationEmailSendFailed(ex, command.InvitationId.Value, command.Attempt, false, SupportId.Current);
             var delay = command.Attempt switch
             {
                 1 => TimeSpan.FromMinutes(1),
@@ -163,12 +187,13 @@ public sealed class InvitationWorkflow(
                 _ => TimeSpan.FromMinutes(15)
             };
             await bus.ScheduleAsync(
-                new RetrySendInvitationEmail(command.InvitationId, command.RawToken, command.RequiresPasswordSetup, command.Attempt + 1),
+                new RetrySendInvitationEmail(command.InvitationId, command.RequiresPasswordSetup, command.Attempt + 1, command.Audit),
                 DateTime.UtcNow + delay);
         }
         catch (Exception ex)
         {
-            session.Events.Append(invitation.Id, new InvitationFailed(command.InvitationId, TimeProvider.System.GetUtcNow(), ex.Message));
+            RecordFailure(session, invitation, command.InvitationId, "email_delivery_failed", "Invitation email delivery failed.", command.Audit?.CausationId);
+            logger.InvitationEmailSendFailed(ex, invitation.Id, command.Attempt, true, SupportId.Current);
             await session.SaveChangesAsync(ct);
         }
     }
@@ -185,11 +210,36 @@ public sealed class InvitationWorkflow(
             return;
 
         session.Events.Append(invitation.Id, new InvitationExpired(command.InvitationId, TimeProvider.System.GetUtcNow()));
+        audit.Record(session, OrgAudit.SystemRecord(
+            OrgAuditActions.InvitationExpired,
+            AuditCategories.Invitation,
+            AuditSeverities.Warn,
+            AuditActor.BackgroundSystem(),
+            invitation.TenantId,
+            invitation.TargetOrgNodeId,
+            details: OrgAudit.InviteDetails(invitation),
+            subjectId: invitation.SubjectId,
+            causationId: command.Audit?.CausationId));
         await session.SaveChangesAsync(ct);
     }
 
     public async Task Handle(RetrySendInvitationEmail command, IMessageBus bus, CancellationToken ct)
     {
-        await bus.InvokeAsync(new SendInvitationEmail(command.InvitationId, command.RawToken, command.RequiresPasswordSetup, command.Attempt), ct);
+        await bus.InvokeAsync(new SendInvitationEmail(command.InvitationId, command.RequiresPasswordSetup, command.Attempt, command.Audit), ct);
+    }
+
+    private void RecordFailure(IDocumentSession session, InvitationReadModel invitation, InvitationId invitationId, string code, string summary, string? causationId)
+    {
+        session.Events.Append(invitation.Id, new InvitationFailed(invitationId, TimeProvider.System.GetUtcNow(), code, summary));
+        audit.Record(session, OrgAudit.SystemRecord(
+            OrgAuditActions.InvitationFailed,
+            AuditCategories.Invitation,
+            AuditSeverities.Warn,
+            AuditActor.BackgroundSystem(),
+            invitation.TenantId,
+            invitation.TargetOrgNodeId,
+            details: OrgAudit.InviteDetails(invitation, new { FailureCode = code, FailureSummary = summary }),
+            subjectId: invitation.SubjectId,
+            causationId: causationId));
     }
 }

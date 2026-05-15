@@ -18,6 +18,7 @@ public static class InvitationHandlers
         IDocumentStore store,
         OrgAuthorizationService authorization,
         IMessageBus bus,
+        IAuditWriter audit,
         BrandTenantContext tenant,
         ActorContext actor,
         CancellationToken ct)
@@ -68,15 +69,25 @@ public static class InvitationHandlers
                 actor.ExternalId,
                 now));
 
-        AuditLog.Write(platformSession, OrgAuditActions.InvitationRequested, actor, tenant.TenantId.Value, target.Id, null, new
-        {
-            InvitationId = OrgPublicId.FormatInvitation(invitationId),
-            SubjectEmail = request.Email.Trim(),
-            Role = request.Role.ToString()
-        });
+        audit.Record(platformSession, OrgAudit.Record(
+            OrgAuditActions.InvitationRequested,
+            AuditCategories.Invitation,
+            AuditSeverities.Info,
+            actor,
+            tenant.TenantId.Value,
+            target.Id,
+            details: new
+            {
+                InvitationId = OrgPublicId.FormatInvitation(invitationId),
+                InviteeEmailMasked = AuditIdentity.MaskEmail(request.Email),
+                Role = request.Role.ToString()
+            },
+            targetPublicId: target.PublicId,
+            targetType: target.Type.ToString().ToLowerInvariant(),
+            targetLabel: target.Name));
 
         await platformSession.SaveChangesAsync(ct);
-        await bus.InvokeAsync(new ProvisionInvitation(invitationId));
+        await bus.InvokeAsync(new ProvisionInvitation(invitationId, new MessageAuditContext(SupportId.Current)));
 
         var created = await platformSession.LoadAsync<InvitationReadModel>(invitationId.Value, ct)
             ?? throw new InvalidOperationException("Projection failed to create InvitationReadModel.");
@@ -90,6 +101,7 @@ public static class InvitationHandlers
         string invitationId,
         IDocumentStore store,
         OrgAuthorizationService authorization,
+        IAuditWriter audit,
         ActorContext actor,
         CancellationToken ct)
     {
@@ -144,6 +156,7 @@ public static class InvitationHandlers
         CancelInvitationRequest request,
         IDocumentStore store,
         OrgAuthorizationService authorization,
+        IAuditWriter audit,
         ActorContext actor,
         CancellationToken ct)
     {
@@ -160,12 +173,15 @@ public static class InvitationHandlers
         platformSession.Events.Append(invitation.Id,
             new InvitationCancelled(new InvitationId(invitation.Id), TimeProvider.System.GetUtcNow(), reason));
 
-        AuditLog.Write(platformSession, OrgAuditActions.InvitationCancelled, actor, invitation.TenantId, invitation.TargetOrgNodeId, reason, new
-        {
-            invitation.PublicId,
-            invitation.Email,
-            Role = invitation.Role.ToString()
-        });
+        audit.Record(platformSession, OrgAudit.Record(
+            OrgAuditActions.InvitationCancelled,
+            AuditCategories.Invitation,
+            AuditSeverities.Info,
+            actor,
+            invitation.TenantId,
+            invitation.TargetOrgNodeId,
+            reason,
+            OrgAudit.InviteDetails(invitation)));
 
         await platformSession.SaveChangesAsync(ct);
         var updated = await platformSession.LoadAsync<InvitationReadModel>(invitation.Id, ct)
@@ -180,7 +196,7 @@ public static class InvitationHandlers
         IDocumentStore store,
         OrgAuthorizationService authorization,
         IMessageBus bus,
-        InvitationTokenService tokens,
+        IAuditWriter audit,
         ActorContext actor,
         CancellationToken ct)
     {
@@ -193,16 +209,19 @@ public static class InvitationHandlers
 
         await EnsureInvitationManageableAsync(store, authorization, actor, invitation, ct);
 
-        var rawToken = tokens.GenerateRawToken();
         var expiresAt = TimeProvider.System.GetUtcNow().AddDays(1);
-        platformSession.Events.Append(invitation.Id,
-            new InvitationTokenIssued(new InvitationId(invitation.Id), tokens.Hash(rawToken), expiresAt));
-        platformSession.Events.Append(invitation.Id,
-            new InvitationMarkedPending(new InvitationId(invitation.Id), TimeProvider.System.GetUtcNow()));
+        audit.Record(platformSession, OrgAudit.Record(
+            OrgAuditActions.InvitationResent,
+            AuditCategories.Invitation,
+            AuditSeverities.Info,
+            actor,
+            invitation.TenantId,
+            invitation.TargetOrgNodeId,
+            details: OrgAudit.InviteDetails(invitation)));
         await platformSession.SaveChangesAsync(ct);
 
-        await bus.InvokeAsync(new SendInvitationEmail(new InvitationId(invitation.Id), rawToken, RequiresPasswordSetup: false, 1));
-        await bus.ScheduleAsync(new ExpireInvitation(new InvitationId(invitation.Id), expiresAt), expiresAt.UtcDateTime);
+        await bus.InvokeAsync(new SendInvitationEmail(new InvitationId(invitation.Id), RequiresPasswordSetup: false, 1, new MessageAuditContext(SupportId.Current)));
+        await bus.ScheduleAsync(new ExpireInvitation(new InvitationId(invitation.Id), expiresAt, new MessageAuditContext(SupportId.Current)), expiresAt.UtcDateTime);
 
         var updated = await platformSession.LoadAsync<InvitationReadModel>(invitation.Id, ct)
             ?? throw new InvalidOperationException("Invitation projection missing after resend.");
@@ -214,6 +233,7 @@ public static class InvitationHandlers
         string token,
         IDocumentStore store,
         OrgAuthorizationService authorization,
+        IAuditWriter audit,
         HttpContext httpContext,
         CancellationToken ct)
     {
@@ -225,7 +245,17 @@ public static class InvitationHandlers
             .SingleOrDefaultAsync(ct);
 
         if (invitation is null)
+        {
+            await audit.RecordDeniedAsync(OrgAudit.SystemRecord(
+                OrgAuditActions.InvitationSecurityFailed,
+                AuditCategories.Security,
+                AuditSeverities.Warn,
+                AuditActor.UnauthenticatedSystem(),
+                null,
+                null,
+                details: new { FailureCode = "invalid_or_expired_token" }), ct);
             throw new DomainException("Invitation token is invalid or has expired.", 404);
+        }
 
         if (httpContext.User.Identity?.IsAuthenticated != true)
             return Results.Challenge();
@@ -237,15 +267,48 @@ public static class InvitationHandlers
         SessionMetadata.StampActor(platformSession, actor);
 
         if (actor.SubjectId is null || invitation.SubjectId != actor.SubjectId.Value.Value)
+        {
+            await audit.RecordDeniedAsync(OrgAudit.Record(
+                OrgAuditActions.InvitationSecurityFailed,
+                AuditCategories.Security,
+                AuditSeverities.Warn,
+                actor,
+                invitation.TenantId,
+                invitation.TargetOrgNodeId,
+                details: OrgAudit.InviteDetails(invitation, new { FailureCode = "actor_mismatch" }),
+                subjectId: invitation.SubjectId), ct);
             throw new DomainException("The authenticated user does not match this invitation.", 403);
+        }
 
         var acceptedId = new InvitationId(invitation.Id);
         var acceptedAt = TimeProvider.System.GetUtcNow();
 
         if (invitation.Status != InvitationStatus.Pending)
+        {
+            await audit.RecordDeniedAsync(OrgAudit.Record(
+                OrgAuditActions.InvitationSecurityFailed,
+                AuditCategories.Security,
+                AuditSeverities.Warn,
+                actor,
+                invitation.TenantId,
+                invitation.TargetOrgNodeId,
+                details: OrgAudit.InviteDetails(invitation, new { FailureCode = "not_pending" }),
+                subjectId: invitation.SubjectId), ct);
             throw new DomainException("Invitation is no longer pending.");
+        }
         if (invitation.ExpiresAt is not null && invitation.ExpiresAt <= acceptedAt)
+        {
+            await audit.RecordDeniedAsync(OrgAudit.Record(
+                OrgAuditActions.InvitationSecurityFailed,
+                AuditCategories.Security,
+                AuditSeverities.Warn,
+                actor,
+                invitation.TenantId,
+                invitation.TargetOrgNodeId,
+                details: OrgAudit.InviteDetails(invitation, new { FailureCode = "expired" }),
+                subjectId: invitation.SubjectId), ct);
             throw new DomainException("Invitation has expired.");
+        }
 
         var subject = await platformSession.LoadAsync<SubjectReadModel>(invitation.SubjectId.Value, ct)
             ?? throw new DomainException("Invitation subject is missing.");
@@ -259,6 +322,7 @@ public static class InvitationHandlers
             acceptedId,
             acceptedAt,
             accepted: true,
+            audit,
             ct);
 
         if (currentTarget.Outcome == InvitationApplyOutcome.Obsolete)
@@ -277,13 +341,15 @@ public static class InvitationHandlers
 
         platformSession.Events.Append(invitation.Id,
             new InvitationAccepted(acceptedId, acceptedAt, currentTarget.GrantCreated, subjectOnboarded));
-        AuditLog.Write(platformSession, OrgAuditActions.InvitationAccepted, actor, invitation.TenantId, invitation.TargetOrgNodeId, null, new
-        {
-            invitation.PublicId,
-            invitation.Email,
-            Role = invitation.Role.ToString(),
-            currentTarget.GrantCreated
-        });
+        audit.Record(platformSession, OrgAudit.Record(
+            OrgAuditActions.InvitationAccepted,
+            AuditCategories.Invitation,
+            AuditSeverities.Info,
+            actor,
+            invitation.TenantId,
+            invitation.TargetOrgNodeId,
+            details: OrgAudit.InviteDetails(invitation, new { currentTarget.GrantCreated }),
+            subjectId: invitation.SubjectId));
 
         var autoApplied = 0;
         if (subjectOnboarded)
@@ -306,19 +372,22 @@ public static class InvitationHandlers
                     new InvitationId(pendingInvitation.Id),
                     acceptedAt,
                     accepted: false,
+                    audit,
                     ct);
 
                 if (result.Outcome != InvitationApplyOutcome.Obsolete)
                 {
                     platformSession.Events.Append(pendingInvitation.Id,
                         new InvitationAutoApplied(new InvitationId(pendingInvitation.Id), acceptedAt, result.GrantCreated));
-                    AuditLog.Write(platformSession, OrgAuditActions.InvitationAutoApplied, actor, pendingInvitation.TenantId, pendingInvitation.TargetOrgNodeId, null, new
-                    {
-                        pendingInvitation.PublicId,
-                        pendingInvitation.Email,
-                        Role = pendingInvitation.Role.ToString(),
-                        result.GrantCreated
-                    });
+                    audit.Record(platformSession, OrgAudit.Record(
+                        OrgAuditActions.InvitationAutoApplied,
+                        AuditCategories.Invitation,
+                        AuditSeverities.Info,
+                        actor,
+                        pendingInvitation.TenantId,
+                        pendingInvitation.TargetOrgNodeId,
+                        details: OrgAudit.InviteDetails(pendingInvitation, new { result.GrantCreated }),
+                        subjectId: pendingInvitation.SubjectId));
                     autoApplied++;
                 }
             }
@@ -443,6 +512,7 @@ public static class InvitationHandlers
         InvitationId invitationId,
         DateTimeOffset now,
         bool accepted,
+        IAuditWriter audit,
         CancellationToken ct)
     {
         await using var tenantSession = store.LightweightSession(invitation.TenantId.ToString());
@@ -452,11 +522,15 @@ public static class InvitationHandlers
         {
             platformSession.Events.Append(invitation.Id,
                 new InvitationObsoleted(invitationId, now, "The target org node is inactive."));
-            AuditLog.Write(platformSession, OrgAuditActions.InvitationObsoleted, actor, invitation.TenantId, invitation.TargetOrgNodeId, null, new
-            {
-                invitation.PublicId,
-                invitation.Email
-            });
+            audit.Record(platformSession, OrgAudit.Record(
+                OrgAuditActions.InvitationObsoleted,
+                AuditCategories.Invitation,
+                AuditSeverities.Warn,
+                actor,
+                invitation.TenantId,
+                invitation.TargetOrgNodeId,
+                details: OrgAudit.InviteDetails(invitation, new { Reason = "The target org node is inactive." }),
+                subjectId: invitation.SubjectId));
             return new InvitationApplyResult(false, InvitationApplyOutcome.Obsolete);
         }
 

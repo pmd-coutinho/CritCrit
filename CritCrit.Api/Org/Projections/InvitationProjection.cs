@@ -46,7 +46,6 @@ public sealed class InvitationProjection : SingleStreamProjection<InvitationRead
         view.TokenHash = e.TokenHash;
         view.ExpiresAt = e.ExpiresAt;
         view.UpdatedAt = e.ExpiresAt;
-        view.Status = InvitationStatus.Provisioning;
         view.CompletedAt = null;
         view.Failure = null;
     }
@@ -112,7 +111,7 @@ public sealed class InvitationProjection : SingleStreamProjection<InvitationRead
         view.Status = InvitationStatus.Failed;
         view.CompletedAt = e.FailedAt;
         view.TokenHash = null;
-        view.Failure = e.Failure;
+        view.Failure = $"{e.FailureCode}: {e.FailureSummary}";
         view.UpdatedAt = e.FailedAt;
     }
 

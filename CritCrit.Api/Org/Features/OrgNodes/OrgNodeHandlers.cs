@@ -16,6 +16,7 @@ public static class OrgNodeHandlers
         string brandId,
         IDocumentStore store,
         OrgAuthorizationService authorization,
+        IAuditWriter audit,
         BrandTenantContext tenant,
         ActorContext actor,
         CancellationToken ct)
@@ -34,6 +35,17 @@ public static class OrgNodeHandlers
         var id = OrgNodeId.New();
         session.Events.StartStream<OrgNodeReadModel>(id.Value,
             new OrgNodeCreated(id, tenant.TenantId, parentId, OrgNodeType.Country, request.Code.Trim(), normalized, request.Name.Trim()));
+        audit.Record(session, OrgAudit.Record(
+            OrgAuditActions.OrgNodeCreated,
+            AuditCategories.Org,
+            AuditSeverities.Info,
+            actor,
+            tenant.TenantId.Value,
+            id.Value,
+            details: new { Type = OrgNodeType.Country.ToString(), Code = request.Code.Trim(), Name = request.Name.Trim(), ParentId = parent.PublicId },
+            targetPublicId: OrgPublicId.Format(OrgNodeType.Country, id),
+            targetType: "country",
+            targetLabel: request.Name.Trim()));
 
         await session.SaveChangesAsync(ct);
         var node = await session.LoadAsync<OrgNodeReadModel>(id.Value, ct)
@@ -48,6 +60,7 @@ public static class OrgNodeHandlers
         string brandId,
         IDocumentStore store,
         OrgAuthorizationService authorization,
+        IAuditWriter audit,
         BrandTenantContext tenant,
         ActorContext actor,
         CancellationToken ct)
@@ -66,6 +79,17 @@ public static class OrgNodeHandlers
         var id = OrgNodeId.New();
         session.Events.StartStream<OrgNodeReadModel>(id.Value,
             new OrgNodeCreated(id, tenant.TenantId, parentId, OrgNodeType.Franchise, request.Code.Trim(), normalized, request.Name.Trim()));
+        audit.Record(session, OrgAudit.Record(
+            OrgAuditActions.OrgNodeCreated,
+            AuditCategories.Org,
+            AuditSeverities.Info,
+            actor,
+            tenant.TenantId.Value,
+            id.Value,
+            details: new { Type = OrgNodeType.Franchise.ToString(), Code = request.Code.Trim(), Name = request.Name.Trim(), ParentId = parent.PublicId },
+            targetPublicId: OrgPublicId.Format(OrgNodeType.Franchise, id),
+            targetType: "franchise",
+            targetLabel: request.Name.Trim()));
 
         await session.SaveChangesAsync(ct);
         var node = await session.LoadAsync<OrgNodeReadModel>(id.Value, ct)
@@ -80,6 +104,7 @@ public static class OrgNodeHandlers
         string brandId,
         IDocumentStore store,
         OrgAuthorizationService authorization,
+        IAuditWriter audit,
         BrandTenantContext tenant,
         ActorContext actor,
         CancellationToken ct)
@@ -101,6 +126,17 @@ public static class OrgNodeHandlers
             new OrgNodeCreated(id, tenant.TenantId, parentId, OrgNodeType.Store, request.Code.Trim(), normalized, request.Name.Trim()));
         session.Events.Append(id.Value,
             new StoreProfileCreated(id, tz));
+        audit.Record(session, OrgAudit.Record(
+            OrgAuditActions.OrgNodeCreated,
+            AuditCategories.Org,
+            AuditSeverities.Info,
+            actor,
+            tenant.TenantId.Value,
+            id.Value,
+            details: new { Type = OrgNodeType.Store.ToString(), Code = request.Code.Trim(), Name = request.Name.Trim(), ParentId = parent.PublicId, TimeZone = tz },
+            targetPublicId: OrgPublicId.Format(OrgNodeType.Store, id),
+            targetType: "store",
+            targetLabel: request.Name.Trim()));
 
         await session.SaveChangesAsync(ct);
         var node = await session.LoadAsync<OrgNodeReadModel>(id.Value, ct)
@@ -115,6 +151,7 @@ public static class OrgNodeHandlers
         string brandId,
         IDocumentStore store,
         OrgAuthorizationService authorization,
+        IAuditWriter audit,
         BrandTenantContext tenant,
         ActorContext actor,
         CancellationToken ct)
@@ -135,6 +172,17 @@ public static class OrgNodeHandlers
             new OrgNodeCreated(id, tenant.TenantId, parentStoreId, OrgNodeType.Device, request.SerialNumber.Trim(), normalized, request.Name.Trim()));
         session.Events.Append(id.Value,
             new DeviceProfileCreated(id, request.SerialNumber.Trim(), request.DeviceType));
+        audit.Record(session, OrgAudit.Record(
+            OrgAuditActions.OrgNodeCreated,
+            AuditCategories.Org,
+            AuditSeverities.Info,
+            actor,
+            tenant.TenantId.Value,
+            id.Value,
+            details: new { Type = OrgNodeType.Device.ToString(), SerialNumber = request.SerialNumber.Trim(), Name = request.Name.Trim(), ParentId = parent.PublicId, DeviceType = request.DeviceType.ToString() },
+            targetPublicId: OrgPublicId.Format(OrgNodeType.Device, id),
+            targetType: "device",
+            targetLabel: request.Name.Trim()));
 
         await session.SaveChangesAsync(ct);
         var node = await session.LoadAsync<OrgNodeReadModel>(id.Value, ct)
@@ -152,6 +200,7 @@ public static class OrgNodeHandlers
         string brandId,
         IDocumentStore store,
         OrgAuthorizationService authorization,
+        IAuditWriter audit,
         BrandTenantContext tenant,
         ActorContext actor,
         CancellationToken ct)
@@ -206,18 +255,19 @@ public static class OrgNodeHandlers
                 session.Store(descendant);
             }
 
-            AuditLog.Write(
-                session,
+            audit.Record(session, OrgAudit.Record(
                 target.Type == OrgNodeType.Brand ? OrgAuditActions.BrandArchive : OrgAuditActions.CascadeArchive,
+                AuditCategories.Org,
+                target.Type == OrgNodeType.Brand ? AuditSeverities.Critical : AuditSeverities.Warn,
                 actor,
                 tenant.TenantId.Value,
                 id.Value,
                 request.Reason,
-                new
-                {
-                    TargetId = target.PublicId,
-                    DescendantCount = descendants.Count
-                });
+                new { TargetId = target.PublicId, DescendantCount = descendants.Count },
+                changes: [new AuditFieldChange("archived", false, true)],
+                targetPublicId: target.PublicId,
+                targetType: target.Type.ToString().ToLowerInvariant(),
+                targetLabel: target.Name));
         }
 
         await session.SaveChangesAsync(ct);
@@ -232,6 +282,7 @@ public static class OrgNodeHandlers
         string brandId,
         IDocumentStore store,
         OrgAuthorizationService authorization,
+        IAuditWriter audit,
         BrandTenantContext tenant,
         ActorContext actor,
         CancellationToken ct)
@@ -286,18 +337,18 @@ public static class OrgNodeHandlers
 
         if (target.Type == OrgNodeType.Brand)
         {
-            AuditLog.Write(
-                session,
+            audit.Record(session, OrgAudit.Record(
                 OrgAuditActions.BrandRestore,
+                AuditCategories.Org,
+                AuditSeverities.Critical,
                 actor,
                 tenant.TenantId.Value,
                 id.Value,
-                null,
-                new
-                {
-                    TargetId = target.PublicId,
-                    DescendantCount = descendants.Count
-                });
+                details: new { TargetId = target.PublicId, DescendantCount = descendants.Count },
+                changes: [new AuditFieldChange("archived", true, false)],
+                targetPublicId: target.PublicId,
+                targetType: target.Type.ToString().ToLowerInvariant(),
+                targetLabel: target.Name));
         }
 
         await session.SaveChangesAsync(ct);
@@ -314,6 +365,7 @@ public static class OrgNodeHandlers
         string brandId,
         IDocumentStore store,
         OrgAuthorizationService authorization,
+        IAuditWriter audit,
         BrandTenantContext tenant,
         ActorContext actor,
         CancellationToken ct)
@@ -377,9 +429,10 @@ public static class OrgNodeHandlers
             });
         }
 
-        AuditLog.Write(
-            session,
+        audit.Record(session, OrgAudit.Record(
             OrgAuditActions.HardDeleteSubtree,
+            AuditCategories.Org,
+            AuditSeverities.Critical,
             actor,
             tenant.TenantId.Value,
             id.Value,
@@ -389,7 +442,11 @@ public static class OrgNodeHandlers
                 TargetId = target.PublicId,
                 DeletedNodes = subtree.Select(DescribeNode).ToArray(),
                 RevokedGrantCount = activeGrants.Count(x => x.ExpiresAt is null || x.ExpiresAt > now)
-            });
+            },
+            changes: [new AuditFieldChange("hardDeleted", false, true)],
+            targetPublicId: target.PublicId,
+            targetType: target.Type.ToString().ToLowerInvariant(),
+            targetLabel: target.Name));
 
         await session.SaveChangesAsync(ct);
     }
@@ -401,6 +458,7 @@ public static class OrgNodeHandlers
         string brandId,
         IDocumentStore store,
         OrgAuthorizationService authorization,
+        IAuditWriter audit,
         BrandTenantContext tenant,
         ActorContext actor,
         CancellationToken ct)
@@ -435,9 +493,10 @@ public static class OrgNodeHandlers
 
         var oldParentId = target.ParentId is not null ? new OrgNodeId(target.ParentId.Value) : tenant.TenantId;
         session.Events.Append(id.Value, new OrgNodeMoved(id, oldParentId, newParentId, request.Reason));
-        AuditLog.Write(
-            session,
+        audit.Record(session, OrgAudit.Record(
             OrgAuditActions.OrgNodeMove,
+            AuditCategories.Org,
+            AuditSeverities.Info,
             actor,
             tenant.TenantId.Value,
             id.Value,
@@ -447,7 +506,11 @@ public static class OrgNodeHandlers
                 TargetId = target.PublicId,
                 OldParentId = target.ParentPublicId ?? tenant.BrandPublicId,
                 NewParentId = newParent.PublicId
-            });
+            },
+            changes: [new AuditFieldChange("parentId", target.ParentPublicId ?? tenant.BrandPublicId, newParent.PublicId)],
+            targetPublicId: target.PublicId,
+            targetType: target.Type.ToString().ToLowerInvariant(),
+            targetLabel: target.Name));
 
         await session.SaveChangesAsync(ct);
 

@@ -76,6 +76,7 @@ public static class Extensions
                     .AddHttpClientInstrumentation();
                 tracing.AddSource("Wolverine");
                 tracing.AddSource("Marten");
+                tracing.AddSource("CritCrit.Api");
             });
 
         builder.AddOpenTelemetryExporters();

@@ -6,7 +6,7 @@ using CritCrit.Api.Org.Endpoints;
 using CritCrit.Api.Org.Infrastructure;
 using CritCrit.Api.Org.Identity;
 using CritCrit.Api.Org.Invitations;
-using CritCrit.Api.Platform.Audit;
+using CritCrit.Api.Observability.Audit;
 using CritCrit.Test.Fixtures;
 using Marten;
 using Microsoft.Extensions.DependencyInjection;
@@ -2051,11 +2051,11 @@ public class OrgHierarchyTests : ContractTestWithAlba
 
         var bus = Host.Services.GetRequiredService<IMessageBus>();
         // Attempt 1 fails -> schedules retry
-        await bus.InvokeAsync(new SendInvitationEmail(invitationId, "fake-token", false, 1));
+        await bus.InvokeAsync(new SendInvitationEmail(invitationId, false, 1));
         // Attempt 2 fails -> schedules retry
-        await bus.InvokeAsync(new RetrySendInvitationEmail(invitationId, "fake-token", false, 2));
+        await bus.InvokeAsync(new RetrySendInvitationEmail(invitationId, false, 2));
         // Attempt 3 fails -> InvitationFailed appended
-        await bus.InvokeAsync(new RetrySendInvitationEmail(invitationId, "fake-token", false, 3));
+        await bus.InvokeAsync(new RetrySendInvitationEmail(invitationId, false, 3));
 
         await using var query = DocumentStore.QuerySession();
         var after = await query.LoadAsync<InvitationReadModel>(invitationId.Value);
