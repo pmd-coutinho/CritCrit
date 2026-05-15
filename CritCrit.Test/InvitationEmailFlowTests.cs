@@ -1,7 +1,7 @@
 using System.Net;
 using CritCrit.Api.Org.Domain;
 using CritCrit.Api.Org.Endpoints;
-using CritCrit.Api.Org.Handlers;
+using CritCrit.Api.Org.Features.Invitations;
 using CritCrit.Api.Org.Identity;
 using CritCrit.Test.Fixtures;
 using Wolverine.Tracking;

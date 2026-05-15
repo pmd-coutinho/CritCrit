@@ -1,6 +1,6 @@
 using CritCrit.Api.Org.Domain;
 
-namespace CritCrit.Api.Org.Handlers;
+namespace CritCrit.Api.Org.Features.Invitations;
 
 public sealed record ProvisionInvitation(InvitationId InvitationId);
 

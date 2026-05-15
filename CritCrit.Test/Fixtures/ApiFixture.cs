@@ -1,6 +1,8 @@
 using Alba;
+using CritCrit.Test.Outbox;
 using JasperFx.CommandLine;
 using Microsoft.AspNetCore.Hosting;
+using Microsoft.Extensions.DependencyInjection;
 using Testcontainers.PostgreSql;
 using Wolverine;
 
@@ -27,6 +29,12 @@ public class ApiFixture : IAsyncLifetime
             builder.UseEnvironment("Testing");
             builder.ConfigureServices(services =>
             {
+                services.AddSingleton<OutboxProbeStore>();
+                services.ConfigureWolverine(options =>
+                {
+                    options.Discovery.IncludeAssembly(typeof(OutboxProbeHandlers).Assembly);
+                });
+
                 // Run Wolverine in "solo" mode for faster test startup —
                 // skips leader election, durability agents, etc.
                 services.RunWolverineInSoloMode();

@@ -1,12 +1,14 @@
 using CritCrit.Api.Org.Auth;
 using CritCrit.Api.Org.Domain;
 using CritCrit.Api.Org.Endpoints;
+using CritCrit.Api.Org.Features.Invitations;
 using CritCrit.Api.Org.Infrastructure;
 using Marten;
 using Wolverine;
 using Wolverine.Http;
+using Wolverine.Marten;
 
-namespace CritCrit.Api.Org.Handlers;
+namespace CritCrit.Api.Org.Features.AccessGrants;
 
 public static class AccessGrantHandlers
 {
@@ -16,13 +18,14 @@ public static class AccessGrantHandlers
         string brandId,
         IDocumentStore store,
         OrgAuthorizationService authorization,
-        IMessageBus bus,
+        IMartenOutbox outbox,
         BrandTenantContext tenant,
         ActorContext actor,
         CancellationToken ct)
     {
         await using var session = SessionFactory.TenantSession(store, tenant);
         SessionMetadata.StampActor(session, actor);
+        outbox.Enroll(session);
 
         if (!OrgPublicId.TryParseOrgNode(request.OrgNodeId, out var nodeId, out _))
             throw new DomainException("Invalid org node ID.");
@@ -88,13 +91,13 @@ public static class AccessGrantHandlers
                 });
             }
 
-            await session.SaveChangesAsync(ct);
-
             // Trigger redundant cleanup if upgrading to a stronger role
             if (request.Role > grant.Role)
             {
-                await bus.PublishAsync(new CleanupRedundantGrants(tenant.TenantId, nodeId, subjectId, request.Role));
+                await outbox.PublishAsync(new CleanupRedundantGrants(tenant.TenantId, nodeId, subjectId, request.Role));
             }
+
+            await session.SaveChangesAsync(ct);
 
             var updated = await session.LoadAsync<OrgAccessGrantReadModel>(id, ct);
             return Results.Created($"/api/brands/{brandId}/access-grants/{id}",
@@ -115,20 +118,20 @@ public static class AccessGrantHandlers
             });
         }
 
-        await session.SaveChangesAsync(ct);
-        var created = await session.LoadAsync<OrgAccessGrantReadModel>(id, ct)
-            ?? throw new InvalidOperationException("Projection failed to create OrgAccessGrantReadModel.");
-
         // Schedule expiration if applicable
         if (request.ExpiresAt is not null)
         {
-            await bus.ScheduleAsync(
+            await outbox.ScheduleAsync(
                 new ExpireGrant(tenant.TenantId, nodeId, subjectId, request.ExpiresAt.Value),
                 request.ExpiresAt.Value.UtcDateTime);
         }
 
         // Trigger redundant cleanup for ancestor grants
-        await bus.PublishAsync(new CleanupRedundantGrants(tenant.TenantId, nodeId, subjectId, request.Role));
+        await outbox.PublishAsync(new CleanupRedundantGrants(tenant.TenantId, nodeId, subjectId, request.Role));
+
+        await session.SaveChangesAsync(ct);
+        var created = await session.LoadAsync<OrgAccessGrantReadModel>(id, ct)
+            ?? throw new InvalidOperationException("Projection failed to create OrgAccessGrantReadModel.");
 
         return Results.Created($"/api/brands/{brandId}/access-grants/{id}",
             new GrantResponse(created.Id, request.OrgNodeId, request.SubjectId, created.Role, created.ExpiresAt));
@@ -270,13 +273,14 @@ public static class AccessGrantHandlers
         string brandId,
         IDocumentStore store,
         OrgAuthorizationService authorization,
-        IMessageBus bus,
+        IMartenOutbox outbox,
         BrandTenantContext tenant,
         ActorContext actor,
         CancellationToken ct)
     {
         await using var session = SessionFactory.TenantSession(store, tenant);
         SessionMetadata.StampActor(session, actor);
+        outbox.Enroll(session);
 
         if (!OrgPublicId.TryParseOrgNode(request.OrgNodeId, out var nodeId, out _))
             throw new DomainException("Invalid org node ID.");
@@ -300,15 +304,15 @@ public static class AccessGrantHandlers
         session.Events.Append(grant.StreamId,
             new OrgAccessExpirationChanged(tenant.TenantId, nodeId, subjectId, oldExpiresAt, request.ExpiresAt));
 
-        await session.SaveChangesAsync(ct);
-
         // Schedule or cancel expiration
         if (request.ExpiresAt is not null)
         {
-            await bus.ScheduleAsync(
+            await outbox.ScheduleAsync(
                 new ExpireGrant(tenant.TenantId, nodeId, subjectId, request.ExpiresAt.Value),
                 request.ExpiresAt.Value.UtcDateTime);
         }
+
+        await session.SaveChangesAsync(ct);
 
         var updated = await session.LoadAsync<OrgAccessGrantReadModel>(id, ct)
             ?? throw new InvalidOperationException("Projection failed to update OrgAccessGrantReadModel.");

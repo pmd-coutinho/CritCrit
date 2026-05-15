@@ -1,12 +1,13 @@
 using CritCrit.Api.Org.Auth;
 using CritCrit.Api.Org.Domain;
 using CritCrit.Api.Org.Endpoints;
+using CritCrit.Api.Org.Features.Invitations;
 using CritCrit.Api.Org.Infrastructure;
 using Marten;
-using Wolverine;
 using Wolverine.Http;
+using Wolverine.Marten;
 
-namespace CritCrit.Api.Org.Handlers;
+namespace CritCrit.Api.Org.Features.Owners;
 
 public static class OwnerLifecycleHandlers
 {
@@ -16,13 +17,14 @@ public static class OwnerLifecycleHandlers
         string brandId,
         IDocumentStore store,
         OrgAuthorizationService authorization,
-        IMessageBus bus,
+        IMartenOutbox outbox,
         BrandTenantContext tenant,
         ActorContext actor,
         CancellationToken ct)
     {
         await using var session = SessionFactory.TenantSession(store, tenant);
         SessionMetadata.StampActor(session, actor);
+        outbox.Enroll(session);
         authorization.EnforceSuperAdmin(actor);
 
         if (!OrgPublicId.TryParseSubject(request.SubjectId, out var subjectId))
@@ -75,12 +77,12 @@ public static class OwnerLifecycleHandlers
             NewRole = OrgRole.Owner.ToString()
         });
 
+        // Trigger redundant cleanup for the newly granted owner role
+        await outbox.PublishAsync(new CleanupRedundantGrants(tenant.TenantId, tenant.TenantId, subjectId, OrgRole.Owner));
+
         await session.SaveChangesAsync(ct);
         var created = await session.LoadAsync<OrgAccessGrantReadModel>(id, ct)
             ?? throw new InvalidOperationException("Projection failed to create OrgAccessGrantReadModel.");
-
-        // Trigger redundant cleanup for the newly granted owner role
-        await bus.PublishAsync(new CleanupRedundantGrants(tenant.TenantId, tenant.TenantId, subjectId, OrgRole.Owner));
 
         return Results.Created($"/api/brands/{brandId}/access-grants/{id}",
             new GrantResponse(created.Id, brandId, request.SubjectId, created.Role, created.ExpiresAt));
@@ -93,13 +95,14 @@ public static class OwnerLifecycleHandlers
         string subjectId,
         IDocumentStore store,
         OrgAuthorizationService authorization,
-        IMessageBus bus,
+        IMartenOutbox outbox,
         BrandTenantContext tenant,
         ActorContext actor,
         CancellationToken ct)
     {
         await using var session = SessionFactory.TenantSession(store, tenant);
         SessionMetadata.StampActor(session, actor);
+        outbox.Enroll(session);
         authorization.EnforceSuperAdmin(actor);
 
         if (!OrgPublicId.TryParseSubject(subjectId, out var parsedSubjectId))
@@ -128,14 +131,14 @@ public static class OwnerLifecycleHandlers
             NewRole = request.NewRole.ToString()
         });
 
-        await session.SaveChangesAsync(ct);
-        var updated = await session.LoadAsync<OrgAccessGrantReadModel>(id, ct)
-            ?? throw new InvalidOperationException("Projection failed to update OrgAccessGrantReadModel.");
-
         // After downgrade, descendant grants that were redundant may no longer be redundant.
         // We do not auto-restore them; explicit re-grant is required.
         // But if the new role is stronger than some descendants, we should clean up those descendants.
-        await bus.PublishAsync(new CleanupRedundantGrants(tenant.TenantId, tenant.TenantId, parsedSubjectId, request.NewRole));
+        await outbox.PublishAsync(new CleanupRedundantGrants(tenant.TenantId, tenant.TenantId, parsedSubjectId, request.NewRole));
+
+        await session.SaveChangesAsync(ct);
+        var updated = await session.LoadAsync<OrgAccessGrantReadModel>(id, ct)
+            ?? throw new InvalidOperationException("Projection failed to update OrgAccessGrantReadModel.");
 
         return new GrantResponse(updated.Id, brandId, subjectId, updated.Role, updated.ExpiresAt);
     }

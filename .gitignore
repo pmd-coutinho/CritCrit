@@ -3,3 +3,7 @@ obj/
 /packages/
 riderModule.iml
 /_ReSharper.Caches/
+
+# JetBrains/Rider local IDE metadata
+.idea/
+*.sln.DotSettings.user

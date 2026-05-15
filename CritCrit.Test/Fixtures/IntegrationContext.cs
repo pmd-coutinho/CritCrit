@@ -1,6 +1,7 @@
 using Alba;
 using CritCrit.Api.Org.Identity;
 using CritCrit.Api.Org.Invitations;
+using CritCrit.Test.Outbox;
 using Marten;
 using Microsoft.Extensions.DependencyInjection;
 using Wolverine.Tracking;
@@ -42,6 +43,8 @@ public abstract class IntegrationContext : IAsyncLifetime
         var provisioning = (InMemoryIdentityProviderProvisioning)Host.Services
             .GetRequiredService<IIdentityProviderProvisioning>();
         provisioning.PasswordSetupCalls.Clear();
+
+        Host.Services.GetRequiredService<OutboxProbeStore>().Clear();
     }
 
     public Task DisposeAsync() => Task.CompletedTask;

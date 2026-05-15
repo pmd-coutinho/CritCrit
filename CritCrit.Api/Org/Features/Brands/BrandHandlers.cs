@@ -5,7 +5,7 @@ using CritCrit.Api.Org.Infrastructure;
 using Marten;
 using Wolverine.Http;
 
-namespace CritCrit.Api.Org.Handlers;
+namespace CritCrit.Api.Org.Features.Brands;
 
 public static class BrandHandlers
 {

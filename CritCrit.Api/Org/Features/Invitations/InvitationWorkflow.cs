@@ -1,12 +1,11 @@
 using CritCrit.Api.Org.Domain;
 using CritCrit.Api.Org.Identity;
-using CritCrit.Api.Org.Infrastructure;
 using CritCrit.Api.Org.Invitations;
 using Marten;
 using Wolverine;
 using Wolverine.Attributes;
 
-namespace CritCrit.Api.Org.Handlers;
+namespace CritCrit.Api.Org.Features.Invitations;
 
 [WolverineHandler]
 public sealed class InvitationWorkflow(

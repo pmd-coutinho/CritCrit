@@ -7,7 +7,7 @@ using Marten;
 using Wolverine;
 using Wolverine.Http;
 
-namespace CritCrit.Api.Org.Handlers;
+namespace CritCrit.Api.Org.Features.Invitations;
 
 public static class InvitationHandlers
 {

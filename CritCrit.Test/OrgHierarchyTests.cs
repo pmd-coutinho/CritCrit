@@ -3,7 +3,6 @@ using System.Text.Json;
 using Alba;
 using CritCrit.Api.Org.Domain;
 using CritCrit.Api.Org.Endpoints;
-using CritCrit.Api.Org.Handlers;
 using CritCrit.Api.Org.Infrastructure;
 using CritCrit.Api.Org.Identity;
 using CritCrit.Api.Org.Invitations;
@@ -12,6 +11,7 @@ using CritCrit.Test.Fixtures;
 using Marten;
 using Microsoft.Extensions.DependencyInjection;
 using System.Text.RegularExpressions;
+using CritCrit.Api.Org.Features.Invitations;
 using Wolverine;
 
 namespace CritCrit.Test;

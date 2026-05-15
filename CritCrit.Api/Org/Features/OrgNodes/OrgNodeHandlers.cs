@@ -1,11 +1,12 @@
 using CritCrit.Api.Org.Auth;
 using CritCrit.Api.Org.Domain;
 using CritCrit.Api.Org.Endpoints;
+using CritCrit.Api.Org.Features.Brands;
 using CritCrit.Api.Org.Infrastructure;
 using Marten;
 using Wolverine.Http;
 
-namespace CritCrit.Api.Org.Handlers;
+namespace CritCrit.Api.Org.Features.OrgNodes;
 
 public static class OrgNodeHandlers
 {
