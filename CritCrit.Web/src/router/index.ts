@@ -48,6 +48,11 @@ const routes: RouteRecordRaw[] = [
         component: () => import("@/pages/platform/Subjects.vue"),
       },
       {
+        path: "config",
+        name: "platform-config",
+        component: () => import("@/pages/platform/Config.vue"),
+      },
+      {
         path: "audit",
         name: "platform-audit",
         component: () => import("@/pages/platform/PlatformAudit.vue"),

@@ -8,6 +8,7 @@ const theme = useThemeStore();
 
 const tabs = [
   { to: "/platform/subjects", label: "Subjects" },
+  { to: "/platform/config", label: "Config" },
   { to: "/platform/audit", label: "Audit" },
 ];
 </script>

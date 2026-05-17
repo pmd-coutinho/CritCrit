@@ -5,6 +5,7 @@ using CritCrit.Api.Org.Domain;
 using CritCrit.Api.Org.Identity;
 using CritCrit.Api.Org.Infrastructure;
 using CritCrit.Api.Org.Invitations;
+using CritCrit.Api.Org.Features.Config;
 using CritCrit.Api.Org.Projections;
 using CritCrit.Api.Observability.Audit;
 using CritCrit.Api.Observability.Support;
@@ -193,6 +194,33 @@ public static class CritCritApiConfiguration
             .SingleTenanted()
             .Index(x => x.SubjectId)
             .Index(x => x.TenantId);
+
+        // ─── Config service ───
+        m.Schema.For<ConfigSchemaReadModel>()
+            .SingleTenanted()
+            .Index(x => x.CodeNormalized)
+            .Index(x => x.Archived);
+        m.Schema.For<ConfigSchemaVersionReadModel>()
+            .SingleTenanted()
+            .Index(x => x.SchemaCode)
+            .Index(x => x.Version);
+        m.Schema.For<ConfigSchemaDraftReadModel>()
+            .SingleTenanted()
+            .Index(x => x.SchemaCode)
+            .Index(x => x.Archived)
+            .Index(x => x.Published);
+        m.Schema.For<ConfigAssignmentReadModel>()
+            .MultiTenanted()
+            .Index(x => x.TenantId)
+            .Index(x => x.RootOrgNodeId)
+            .Index(x => x.SchemaCode)
+            .Index(x => x.SchemaVersion)
+            .Index(x => x.Archived);
+        m.Schema.For<ConfigNodeValueReadModel>()
+            .MultiTenanted()
+            .Index(x => x.TenantId)
+            .Index(x => x.OrgNodeId)
+            .Index(x => x.SchemaCode);
     }
 
     private static void ConfigureEventStore(StoreOptions m)
@@ -230,6 +258,9 @@ public static class CritCritApiConfiguration
         m.Projections.Add<InvitationProjection>(ProjectionLifecycle.Inline);
         m.Projections.Add<BrandIndexProjection>(ProjectionLifecycle.Inline);
         m.Projections.Add<SubjectBrandAccessProjection>(ProjectionLifecycle.Inline);
+        m.Projections.Add<ConfigSchemaProjection>(ProjectionLifecycle.Inline);
+        m.Projections.Add<ConfigAssignmentProjection>(ProjectionLifecycle.Inline);
+        m.Projections.Add<ConfigNodeValueProjection>(ProjectionLifecycle.Inline);
     }
 
     private static IServiceCollection AddCritCritMessaging(this IServiceCollection services)
@@ -280,6 +311,12 @@ public static class CritCritApiConfiguration
                 ?? throw new DomainException("Brand tenant not resolved.");
         });
         services.AddSingleton<InvitationTokenService>();
+
+        // ─── Config service ───
+        services.AddDataProtection();
+        services.AddSingleton<IConfigEncryptionService, ConfigEncryptionService>();
+        services.AddSingleton<ConfigValidationService>();
+        services.AddScoped<ConfigResolutionService>();
         services.Configure<KeycloakProvisioningOptions>(configuration.GetSection(KeycloakProvisioningOptions.SectionName));
 
         if (environment.IsEnvironment("Testing"))

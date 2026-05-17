@@ -49,6 +49,15 @@ export const keys = {
   subjects: (filter: string, onboarded: boolean | null, limit: number) =>
     ["subjects", filter, onboarded, limit] as const,
   platformAudit: (filter: AuditFilter, limit: number) => ["platform-audit", filter, limit] as const,
+  configSchemas: (includeArchived: boolean) => ["config-schemas", includeArchived] as const,
+  configSchema: (code: string) => ["config-schema", code] as const,
+  configSchemaVersions: (code: string) => ["config-schema-versions", code] as const,
+  configSchemaDrafts: (code: string) => ["config-schema-drafts", code] as const,
+  nodeConfig: (brandId: string, nodeId: string) => ["node-config", brandId, nodeId] as const,
+  nodeConfigSchema: (brandId: string, nodeId: string, path: string, meta: boolean) =>
+    ["node-config-path", brandId, nodeId, path, meta] as const,
+  nodeAssignments: (brandId: string, nodeId: string, includeArchived: boolean) =>
+    ["node-assignments", brandId, nodeId, includeArchived] as const,
 };
 
 function unwrap<T>(value: { data?: T; error?: unknown; response?: Response }): T {
@@ -480,5 +489,228 @@ export function useAcceptInvite(token: MaybeRefOrGetter<string>) {
       return unwrap(res);
     },
     retry: 0,
+  });
+}
+
+// ─── Config service ───
+
+export function useConfigSchemas(includeArchived: MaybeRefOrGetter<boolean> = () => false) {
+  return useQuery({
+    queryKey: computed(() => keys.configSchemas(toValue(includeArchived))),
+    queryFn: async () => {
+      const res = await api.GET("/api/platform/config-schemas", {
+        params: { query: { includeArchived: toValue(includeArchived) } },
+      });
+      return unwrap(res);
+    },
+  });
+}
+
+export function useConfigSchemaVersions(code: MaybeRefOrGetter<string>) {
+  return useQuery({
+    queryKey: computed(() => keys.configSchemaVersions(toValue(code))),
+    queryFn: async () => {
+      const res = await api.GET("/api/platform/config-schemas/{schemaCode}/versions", {
+        params: { path: { schemaCode: toValue(code) } },
+      });
+      return unwrap(res);
+    },
+    enabled: computed(() => !!toValue(code)),
+  });
+}
+
+export function useConfigSchemaDrafts(code: MaybeRefOrGetter<string>) {
+  return useQuery({
+    queryKey: computed(() => keys.configSchemaDrafts(toValue(code))),
+    queryFn: async () => {
+      const res = await api.GET("/api/platform/config-schemas/{schemaCode}/drafts", {
+        params: { path: { schemaCode: toValue(code) } },
+      });
+      return unwrap(res);
+    },
+    enabled: computed(() => !!toValue(code)),
+  });
+}
+
+export function useCreateConfigSchema() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (body: import("./generated").CreateConfigSchemaRequest) => {
+      const res = await api.POST("/api/platform/config-schemas", { body });
+      return unwrap(res);
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["config-schemas"] }),
+  });
+}
+
+export function usePublishConfigDraft(schemaCode: MaybeRefOrGetter<string>) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ draftId, body }: { draftId: string; body: import("./generated").PublishConfigDraftRequest }) => {
+      const res = await api.POST("/api/platform/config-schemas/{schemaCode}/drafts/{draftId}/publish", {
+        params: { path: { schemaCode: toValue(schemaCode), draftId } },
+        body,
+      });
+      return unwrap(res);
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["config-schemas"] });
+      qc.invalidateQueries({ queryKey: keys.configSchemaDrafts(toValue(schemaCode)) });
+      qc.invalidateQueries({ queryKey: keys.configSchemaVersions(toValue(schemaCode)) });
+    },
+  });
+}
+
+export function useNodeConfigSchemas(brandId: MaybeRefOrGetter<string>, nodeId: MaybeRefOrGetter<string>) {
+  return useQuery({
+    queryKey: computed(() => keys.nodeConfig(toValue(brandId), toValue(nodeId))),
+    queryFn: async () => {
+      const res = await api.GET("/api/brands/{brandId}/org-nodes/{nodeId}/config", {
+        params: { path: { brandId: toValue(brandId), nodeId: toValue(nodeId) } },
+      });
+      return unwrap(res);
+    },
+    enabled: computed(() => !!toValue(brandId) && !!toValue(nodeId)),
+  });
+}
+
+export function useNodeConfigMetadata(
+  brandId: MaybeRefOrGetter<string>,
+  nodeId: MaybeRefOrGetter<string>,
+  path: MaybeRefOrGetter<string>,
+) {
+  return useQuery({
+    queryKey: computed(() => keys.nodeConfigSchema(toValue(brandId), toValue(nodeId), toValue(path), true)),
+    queryFn: async () => {
+      const res = await api.GET("/api/brands/{brandId}/org-nodes/{nodeId}/config/{path}", {
+        params: {
+          path: { brandId: toValue(brandId), nodeId: toValue(nodeId), path: toValue(path) },
+          query: { includeMetadata: true },
+        },
+      });
+      return unwrap(res);
+    },
+    enabled: computed(() => !!toValue(brandId) && !!toValue(nodeId) && !!toValue(path)),
+  });
+}
+
+export function usePatchNodeConfig(brandId: MaybeRefOrGetter<string>, nodeId: MaybeRefOrGetter<string>) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ schemaCode, body }: { schemaCode: string; body: import("./generated").PatchConfigValuesRequest }) => {
+      const res = await api.PATCH("/api/brands/{brandId}/org-nodes/{nodeId}/config/{schemaCode}", {
+        params: { path: { brandId: toValue(brandId), nodeId: toValue(nodeId), schemaCode } },
+        body,
+      });
+      if (!res.response.ok) throw (res as { error?: unknown }).error ?? new Error("Patch failed");
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: keys.nodeConfig(toValue(brandId), toValue(nodeId)) });
+      qc.invalidateQueries({ queryKey: ["node-config-path", toValue(brandId), toValue(nodeId)] });
+    },
+  });
+}
+
+// ─── Config assignments (per-node) ───
+
+export function useNodeAssignments(
+  brandId: MaybeRefOrGetter<string>,
+  nodeId: MaybeRefOrGetter<string>,
+  includeArchived: MaybeRefOrGetter<boolean> = () => false,
+) {
+  return useQuery({
+    queryKey: computed(() =>
+      keys.nodeAssignments(toValue(brandId), toValue(nodeId), toValue(includeArchived)),
+    ),
+    queryFn: async () => {
+      const res = await api.GET("/api/brands/{brandId}/org-nodes/{nodeId}/config-assignments", {
+        params: {
+          path: { brandId: toValue(brandId), nodeId: toValue(nodeId) },
+          query: { includeArchived: toValue(includeArchived) },
+        },
+      });
+      return unwrap(res);
+    },
+    enabled: computed(() => !!toValue(brandId) && !!toValue(nodeId)),
+  });
+}
+
+export function useCreateAssignment(brandId: MaybeRefOrGetter<string>, nodeId: MaybeRefOrGetter<string>) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (body: import("./generated").AssignConfigSchemaRequest) => {
+      const res = await api.POST("/api/brands/{brandId}/org-nodes/{nodeId}/config-assignments", {
+        params: { path: { brandId: toValue(brandId), nodeId: toValue(nodeId) } },
+        body,
+      });
+      return unwrap(res);
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["node-assignments", toValue(brandId), toValue(nodeId)] });
+      qc.invalidateQueries({ queryKey: keys.nodeConfig(toValue(brandId), toValue(nodeId)) });
+    },
+  });
+}
+
+export function useArchiveAssignment(brandId: MaybeRefOrGetter<string>, nodeId: MaybeRefOrGetter<string>) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ assignmentId, body }: { assignmentId: string; body: import("./generated").ArchiveConfigAssignmentRequest }) => {
+      const res = await api.POST("/api/brands/{brandId}/org-nodes/{nodeId}/config-assignments/{assignmentId}/archive", {
+        params: { path: { brandId: toValue(brandId), nodeId: toValue(nodeId), assignmentId } },
+        body,
+      });
+      if (!res.response.ok) throw (res as { error?: unknown }).error ?? new Error("Archive failed");
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["node-assignments", toValue(brandId), toValue(nodeId)] });
+      qc.invalidateQueries({ queryKey: keys.nodeConfig(toValue(brandId), toValue(nodeId)) });
+    },
+  });
+}
+
+export function useRestoreAssignment(brandId: MaybeRefOrGetter<string>, nodeId: MaybeRefOrGetter<string>) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ assignmentId, body }: { assignmentId: string; body: import("./generated").RestoreConfigAssignmentRequest }) => {
+      const res = await api.POST("/api/brands/{brandId}/org-nodes/{nodeId}/config-assignments/{assignmentId}/restore", {
+        params: { path: { brandId: toValue(brandId), nodeId: toValue(nodeId), assignmentId } },
+        body,
+      });
+      if (!res.response.ok) throw (res as { error?: unknown }).error ?? new Error("Restore failed");
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["node-assignments", toValue(brandId), toValue(nodeId)] });
+      qc.invalidateQueries({ queryKey: keys.nodeConfig(toValue(brandId), toValue(nodeId)) });
+    },
+  });
+}
+
+export function useUpgradeAssignmentPreview(brandId: MaybeRefOrGetter<string>, nodeId: MaybeRefOrGetter<string>) {
+  return useMutation({
+    mutationFn: async ({ assignmentId, body }: { assignmentId: string; body: import("./generated").UpgradeConfigAssignmentRequest }) => {
+      const res = await api.POST("/api/brands/{brandId}/org-nodes/{nodeId}/config-assignments/{assignmentId}/upgrade-preview", {
+        params: { path: { brandId: toValue(brandId), nodeId: toValue(nodeId), assignmentId } },
+        body,
+      });
+      return unwrap(res);
+    },
+  });
+}
+
+export function useUpgradeAssignment(brandId: MaybeRefOrGetter<string>, nodeId: MaybeRefOrGetter<string>) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ assignmentId, body }: { assignmentId: string; body: import("./generated").UpgradeConfigAssignmentRequest }) => {
+      const res = await api.POST("/api/brands/{brandId}/org-nodes/{nodeId}/config-assignments/{assignmentId}/upgrade", {
+        params: { path: { brandId: toValue(brandId), nodeId: toValue(nodeId), assignmentId } },
+        body,
+      });
+      return unwrap(res);
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["node-assignments", toValue(brandId), toValue(nodeId)] });
+      qc.invalidateQueries({ queryKey: keys.nodeConfig(toValue(brandId), toValue(nodeId)) });
+    },
   });
 }

@@ -262,6 +262,194 @@ export interface SubjectListItem {
   onboardedAt: string | null;
 }
 
+// ─── Config service types ───
+
+export type ConfigValueType =
+  | "Boolean"
+  | "String"
+  | "Integer"
+  | "Decimal"
+  | "EncryptedString"
+  | "JsonObject"
+  | "JsonArray";
+
+export type ConfigPatchKind = "Set" | "Inherit" | "Unset";
+
+export interface ConfigValueConstraints {
+  enum?: string[] | null;
+  regex?: string | null;
+  minLength?: number | null;
+  maxLength?: number | null;
+  min?: number | null;
+  max?: number | null;
+}
+
+export interface ConfigDefaultValue {
+  jsonValue: string;
+}
+
+export interface ConfigKeyDefinition {
+  code: string;
+  name: string;
+  description?: string | null;
+  valueType: ConfigValueType;
+  constraints?: ConfigValueConstraints | null;
+  jsonSchema?: string | null;
+  defaultValue?: ConfigDefaultValue | null;
+}
+
+export interface ConfigSchemaDefinition {
+  name: string;
+  description?: string | null;
+  keys: ConfigKeyDefinition[];
+}
+
+export interface ConfigSchemaResponse {
+  code: string;
+  name: string;
+  description: string | null;
+  latestPublishedVersion: number | null;
+  archived: boolean;
+  createdAt: string;
+  updatedAt: string;
+  version: number;
+}
+
+export interface ConfigSchemaVersionResponse {
+  schemaCode: string;
+  version: number;
+  definition: ConfigSchemaDefinition;
+  publishedAt: string;
+  publishedByExternalId: string;
+}
+
+export interface ConfigSchemaDraftResponse {
+  id: string;
+  schemaCode: string;
+  name: string;
+  baseVersion: number | null;
+  definition: ConfigSchemaDefinition;
+  archived: boolean;
+  published: boolean;
+  publishedAsVersion: number | null;
+  version: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreateConfigSchemaRequest {
+  code: string;
+  name: string;
+  description?: string | null;
+  draftName: string;
+  definition: ConfigSchemaDefinition;
+}
+
+export interface CreateConfigDraftRequest {
+  name: string;
+  baseVersion: number | null;
+  definition: ConfigSchemaDefinition;
+}
+
+export interface UpdateConfigDraftRequest {
+  expectedVersion: number;
+  name?: string | null;
+  definition: ConfigSchemaDefinition;
+}
+
+export interface PublishConfigDraftRequest {
+  expectedVersion: number;
+  reason?: string | null;
+}
+
+export interface NodeConfigSchemaSummary {
+  schemaCode: string;
+  schemaName: string;
+  schemaVersion: number;
+  assignmentId: string;
+  assignmentRootOrgNodePublicId: string;
+  valueSetVersion: number;
+}
+
+export interface ConfigLookupValueMetadata {
+  state: "set" | "default" | "unset" | "missing";
+  value: unknown;
+  source: string | null;
+  encrypted: boolean;
+  hasValue?: boolean | null;
+  maskedValue?: string | null;
+}
+
+export interface ConfigLookupMetadataResponse {
+  schemaCode: string;
+  schemaVersion: number;
+  nodeId: string;
+  assignment: {
+    id: string;
+    rootOrgNodePublicId: string;
+    schemaCode: string;
+    schemaVersion: number;
+  };
+  valueSetVersion: number;
+  values: Record<string, ConfigLookupValueMetadata>;
+}
+
+export interface ConfigValuePatchOperationInput {
+  keyCode: string;
+  operation: ConfigPatchKind;
+  jsonValue?: string | null;
+}
+
+export interface PatchConfigValuesRequest {
+  expectedVersion: number;
+  operations: ConfigValuePatchOperationInput[];
+  reason?: string | null;
+}
+
+export interface AssignConfigSchemaRequest {
+  schemaCode: string;
+  schemaVersion: number;
+  reason?: string | null;
+}
+
+export interface ArchiveConfigAssignmentRequest {
+  expectedVersion: number;
+  reason?: string | null;
+}
+
+export interface RestoreConfigAssignmentRequest {
+  expectedVersion: number;
+  reason?: string | null;
+}
+
+export interface UpgradeConfigAssignmentRequest {
+  expectedVersion: number;
+  targetSchemaVersion: number;
+  reason?: string | null;
+}
+
+export interface ConfigAssignmentResponse {
+  id: string;
+  rootOrgNodePublicId: string;
+  schemaCode: string;
+  schemaVersion: number;
+  archived: boolean;
+  version: number;
+  assignedAt: string;
+  archivedAt: string | null;
+}
+
+export interface ConfigAssignmentUpgradePreviewResponse {
+  schemaCode: string;
+  fromVersion: number;
+  toVersion: number;
+  compatibleKeys: string[];
+  removedKeys: string[];
+  typeIncompatibleKeys: string[];
+  localValueCountsImpacted: number;
+  publishable: boolean;
+}
+
 export interface paths {
   "/api/brands": {
     get: {
@@ -501,6 +689,127 @@ export interface paths {
         };
       };
       responses: { 200: { content: { "application/json": AuditEventResponse[] } } };
+    };
+  };
+  "/api/platform/config-schemas": {
+    get: {
+      parameters: { query?: { includeArchived?: boolean } };
+      responses: { 200: { content: { "application/json": ConfigSchemaResponse[] } } };
+    };
+    post: {
+      requestBody: { content: { "application/json": CreateConfigSchemaRequest } };
+      responses: {
+        201: {
+          content: {
+            "application/json": { schema: ConfigSchemaResponse; draftId: string };
+          };
+        };
+      };
+    };
+  };
+  "/api/platform/config-schemas/{schemaCode}": {
+    get: {
+      parameters: { path: { schemaCode: string } };
+      responses: { 200: { content: { "application/json": ConfigSchemaResponse } } };
+    };
+  };
+  "/api/platform/config-schemas/{schemaCode}/versions": {
+    get: {
+      parameters: { path: { schemaCode: string } };
+      responses: { 200: { content: { "application/json": ConfigSchemaVersionResponse[] } } };
+    };
+  };
+  "/api/platform/config-schemas/{schemaCode}/drafts": {
+    get: {
+      parameters: { path: { schemaCode: string } };
+      responses: { 200: { content: { "application/json": ConfigSchemaDraftResponse[] } } };
+    };
+    post: {
+      parameters: { path: { schemaCode: string } };
+      requestBody: { content: { "application/json": CreateConfigDraftRequest } };
+      responses: { 201: { content: { "application/json": { draftId: string } } } };
+    };
+  };
+  "/api/platform/config-schemas/{schemaCode}/drafts/{draftId}": {
+    get: {
+      parameters: { path: { schemaCode: string; draftId: string } };
+      responses: { 200: { content: { "application/json": ConfigSchemaDraftResponse } } };
+    };
+    put: {
+      parameters: { path: { schemaCode: string; draftId: string } };
+      requestBody: { content: { "application/json": UpdateConfigDraftRequest } };
+      responses: { 200: { content: { "application/json": ConfigSchemaDraftResponse } } };
+    };
+  };
+  "/api/platform/config-schemas/{schemaCode}/drafts/{draftId}/publish": {
+    post: {
+      parameters: { path: { schemaCode: string; draftId: string } };
+      requestBody: { content: { "application/json": PublishConfigDraftRequest } };
+      responses: { 200: { content: { "application/json": ConfigSchemaVersionResponse } } };
+    };
+  };
+  "/api/brands/{brandId}/org-nodes/{nodeId}/config": {
+    get: {
+      parameters: { path: { brandId: string; nodeId: string } };
+      responses: { 200: { content: { "application/json": NodeConfigSchemaSummary[] } } };
+    };
+  };
+  "/api/brands/{brandId}/org-nodes/{nodeId}/config/{path}": {
+    get: {
+      parameters: {
+        path: { brandId: string; nodeId: string; path: string };
+        query?: { includeMetadata?: boolean };
+      };
+      responses: { 200: { content: { "application/json": ConfigLookupMetadataResponse } } };
+    };
+  };
+  "/api/brands/{brandId}/org-nodes/{nodeId}/config/{schemaCode}": {
+    patch: {
+      parameters: { path: { brandId: string; nodeId: string; schemaCode: string } };
+      requestBody: { content: { "application/json": PatchConfigValuesRequest } };
+      responses: { 204: { content: never } };
+    };
+  };
+  "/api/brands/{brandId}/org-nodes/{nodeId}/config-assignments": {
+    get: {
+      parameters: {
+        path: { brandId: string; nodeId: string };
+        query?: { includeArchived?: boolean };
+      };
+      responses: { 200: { content: { "application/json": ConfigAssignmentResponse[] } } };
+    };
+    post: {
+      parameters: { path: { brandId: string; nodeId: string } };
+      requestBody: { content: { "application/json": AssignConfigSchemaRequest } };
+      responses: { 201: { content: { "application/json": ConfigAssignmentResponse } } };
+    };
+  };
+  "/api/brands/{brandId}/org-nodes/{nodeId}/config-assignments/{assignmentId}/archive": {
+    post: {
+      parameters: { path: { brandId: string; nodeId: string; assignmentId: string } };
+      requestBody: { content: { "application/json": ArchiveConfigAssignmentRequest } };
+      responses: { 204: { content: never } };
+    };
+  };
+  "/api/brands/{brandId}/org-nodes/{nodeId}/config-assignments/{assignmentId}/restore": {
+    post: {
+      parameters: { path: { brandId: string; nodeId: string; assignmentId: string } };
+      requestBody: { content: { "application/json": RestoreConfigAssignmentRequest } };
+      responses: { 204: { content: never } };
+    };
+  };
+  "/api/brands/{brandId}/org-nodes/{nodeId}/config-assignments/{assignmentId}/upgrade-preview": {
+    post: {
+      parameters: { path: { brandId: string; nodeId: string; assignmentId: string } };
+      requestBody: { content: { "application/json": UpgradeConfigAssignmentRequest } };
+      responses: { 200: { content: { "application/json": ConfigAssignmentUpgradePreviewResponse } } };
+    };
+  };
+  "/api/brands/{brandId}/org-nodes/{nodeId}/config-assignments/{assignmentId}/upgrade": {
+    post: {
+      parameters: { path: { brandId: string; nodeId: string; assignmentId: string } };
+      requestBody: { content: { "application/json": UpgradeConfigAssignmentRequest } };
+      responses: { 200: { content: { "application/json": ConfigAssignmentResponse } } };
     };
   };
 }

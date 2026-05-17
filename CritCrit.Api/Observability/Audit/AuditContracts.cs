@@ -10,6 +10,7 @@ public static class AuditCategories
     public const string Invitation = "invitation";
     public const string Subject = "subject";
     public const string Security = "security";
+    public const string Config = "config";
 }
 
 public static class AuditSeverities

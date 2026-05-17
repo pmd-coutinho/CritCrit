@@ -73,6 +73,41 @@ describe("revoke / lifecycle mutation shapes", () => {
   });
 });
 
+describe("config query keys", () => {
+  it("namespaces config schemas by archived toggle", () => {
+    expect(keys.configSchemas(false)).toEqual(["config-schemas", false]);
+    expect(keys.configSchemas(true)).not.toEqual(keys.configSchemas(false));
+  });
+
+  it("namespaces per-schema sub-resources by code", () => {
+    expect(keys.configSchemaDrafts("a")).not.toEqual(keys.configSchemaDrafts("b"));
+    expect(keys.configSchemaVersions("a")).toEqual(["config-schema-versions", "a"]);
+  });
+
+  it("namespaces node config by brand and node", () => {
+    expect(keys.nodeConfig("br_1", "st_1")).toEqual(["node-config", "br_1", "st_1"]);
+    expect(keys.nodeConfigSchema("br_1", "st_1", "pos.k", true)).toEqual([
+      "node-config-path",
+      "br_1",
+      "st_1",
+      "pos.k",
+      true,
+    ]);
+  });
+
+  it("namespaces node assignments by brand, node, and archived flag", () => {
+    expect(keys.nodeAssignments("br_1", "st_1", false)).toEqual([
+      "node-assignments",
+      "br_1",
+      "st_1",
+      false,
+    ]);
+    expect(keys.nodeAssignments("br_1", "st_1", true)).not.toEqual(
+      keys.nodeAssignments("br_1", "st_1", false),
+    );
+  });
+});
+
 describe("api client mocking sanity", () => {
   it("GET mock returns whatever we tell it to", async () => {
     mocks.GET.mockResolvedValue({ data: [{ id: "br_1" }], error: undefined });

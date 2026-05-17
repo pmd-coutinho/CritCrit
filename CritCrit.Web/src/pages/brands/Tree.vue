@@ -22,6 +22,7 @@ import Select from "@/components/ui/Select.vue";
 import PageHeader from "@/components/ui/PageHeader.vue";
 import EmptyState from "@/components/ui/EmptyState.vue";
 import OrgTreeNode from "@/components/OrgTreeNode.vue";
+import NodeConfigDrawer from "@/components/NodeConfigDrawer.vue";
 
 const route = useRoute();
 const brandId = computed(() => route.params.brandId as string);
@@ -165,6 +166,15 @@ async function submitMove() {
   }
 }
 
+// ─── Config drawer ───
+const configOpen = ref(false);
+const configNode = ref<OrgTreeNodeResponse | null>(null);
+
+function openConfig(node: OrgTreeNodeResponse) {
+  configNode.value = node;
+  configOpen.value = true;
+}
+
 // ─── Hard-delete ───
 const deleteOpen = ref(false);
 const deleteTarget = ref<OrgTreeNodeResponse | null>(null);
@@ -228,6 +238,7 @@ async function submitHardDelete() {
         @restore="onRestore"
         @move="openMove"
         @hard-delete="openHardDelete"
+        @config="openConfig"
       />
     </div>
 
@@ -325,6 +336,14 @@ async function submitHardDelete() {
         </div>
       </form>
     </Dialog>
+
+    <!-- Config drawer -->
+    <NodeConfigDrawer
+      :open="configOpen"
+      :brand-id="brandId"
+      :node="configNode"
+      @update:open="configOpen = $event"
+    />
 
     <!-- Hard-delete dialog -->
     <Dialog
