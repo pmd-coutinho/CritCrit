@@ -183,12 +183,17 @@ Wolverine's `[WriteAggregate("argName")]` extracts the stream id from the route 
 
 CritCrit routes use public-id strings (`subj_<guid>`, `inv_<guid>`, etc.). Wolverine's TryParse on `Guid` fails on these, so the endpoint resolves to 404 at runtime even though the aggregate exists.
 
-Workable today: routes that take a raw `Guid` directly (e.g. ConfigSchemaDraft endpoints' `{draftId}`). `ArchiveConfigDraftEndpoint` is the first proof.
+Workable today: routes that take a raw `Guid` directly (e.g. ConfigSchemaDraft endpoints' `{draftId}`). `ArchiveConfigDraftEndpoint` (462e744) and `UpdateConfigDraftEndpoint` (23a164f) are the shipped proofs.
 
-Blocked until lifted (one of these):
-- **Refactor doc identity to use strong-typed IDs** (Marten 8 supports `Schema.For<T>().Identity(x => x.Id)` with strong-typed Id types). Heavier refactor — every doc reference and every projection signature changes.
-- **Dual routes** — public-id route + raw-Guid route per command endpoint, with the raw-Guid route used by `[WriteAggregate]`. Doubles the API surface; bad ergonomics.
-- **Custom Wolverine parameter strategy** that runs `SubjectId.TryParse(routeValue, out var id)` then exposes `id.Value` to `[WriteAggregate]`. Deep Wolverine internals work.
+### Investigation results (later sessions)
+
+**A. Marten strong-typed-id registration alone is NOT sufficient.** Per Marten docs, `FetchForWriting` "requires passing the underlying primitive value rather than the strongly typed identifier directly". Wolverine still uses raw `Guid.Parse` on the route value. Strong-typed-id Marten registration only helps the natural-key resolution path, which Wolverine applies to **request-body properties**, not route parameters.
+
+**B. Before/LoadAsync method returning IEventStream**: blocked. `IEventStream<T>` has no `SaveAsync` and doesn't expose its owning `IDocumentSession`. Multi-entity tuple return from LoadAsync isn't a documented Wolverine convention.
+
+**C. Dual routes** (public-id + raw-Guid companion per command): technically works but doubles API surface. Bad ergonomics not worth the `[WriteAggregate]` gain.
+
+**Real unlock**: needs upstream Wolverine support for strong-typed-id route binding in `[WriteAggregate]`. Either PR `Wolverine.Marten` to call `SubjectId.TryParse` + `.Value` before `FetchForWriting`, or write a custom Wolverine codegen frame mimicking `[WriteAggregate]` (~200 LOC internals, fragile to version upgrades).
 
 Until lifted, `[WriteAggregate]` adoption is constrained to aggregates whose endpoint routes carry the raw `Guid` directly. ConfigSchemaDraft endpoints qualify. Subject, Invitation, ConfigSchema, Owner, Brand, OrgNode all do not (they all use public-id strings in routes).
 
