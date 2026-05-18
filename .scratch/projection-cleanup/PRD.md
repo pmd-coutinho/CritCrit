@@ -16,7 +16,34 @@ Discovered constraint (now documented): when one doc type is the snapshot target
 
 124/124 integration tests green; lifecycle, resolution, and assignment tests all pass against the new shape.
 
-## Still missing
+## Constraint discovered after pilot — event tenancy storage style
+
+Attempting to convert `ConfigAssignmentProjection` to SingleStreamProjection produced:
+
+```
+JasperFx.Events.Projections.InvalidProjectionException : Tenancy storage style
+mismatch between the events (Single) and the aggregate type
+CritCrit.Api.Org.Domain.ConfigAssignmentReadModel (Conjoined)
+```
+
+The Marten event store currently uses single-tenanted event storage (default). The doc types `ConfigAssignmentReadModel`, `OrgNodeReadModel`, `OrgAccessGrantReadModel`, `ConfigNodeValueReadModel`, and `AssetNodeValueReadModel` are all `MultiTenanted()` (Conjoined). `SingleStreamProjection<T>` cannot bridge that mismatch.
+
+To unblock SingleStreamProjection for multi-tenanted aggregates the event store needs `m.Events.TenancyStyle = TenancyStyle.Conjoined`. Schema migration + backfill required. See `.scratch/event-store-tenancy/PRD.md`.
+
+Until that migration lands, **only single-tenanted aggregates can use SingleStreamProjection**:
+
+- ✅ `SubjectReadModel` (already SingleStream)
+- ✅ `InvitationReadModel` (already SingleStream)
+- ✅ `ConfigSchemaReadModel` (this pilot)
+- ✅ `ConfigSchemaDraftReadModel` (this pilot)
+- ✅ `ConfigSchemaVersionReadModel` (immutable, EventProjection legit)
+- ❌ `ConfigAssignmentReadModel` — MultiTenanted, blocked
+- ❌ `OrgNodeReadModel` — MultiTenanted, blocked (also has ancestry-cascade design problem)
+- ❌ `OrgAccessGrantReadModel` — MultiTenanted **and** string composite Id (double-blocked)
+- ❌ `ConfigNodeValueReadModel` — MultiTenanted **and** string composite Id (double-blocked)
+- ❌ `AssetNodeValueReadModel` — MultiTenanted **and** string composite Id (double-blocked)
+
+The single-tenanted aggregates that *could* benefit are all done. The remaining projection-cleanup work is gated on the event-store-tenancy migration.
 
 ## Still missing
 
