@@ -23,7 +23,7 @@ public static class SubjectHandlers
     {
         authorization.EnforceSuperAdmin(actor);
 
-        await using var session = store.QuerySession();
+        await using var session = store.QuerySession(PlatformTenant.Id);
         var query = session.Query<SubjectReadModel>().AsQueryable();
 
         if (!string.IsNullOrWhiteSpace(emailContains))

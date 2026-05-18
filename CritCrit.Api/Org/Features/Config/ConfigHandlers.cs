@@ -52,7 +52,7 @@ public static class ConfigHandlers
             .Select(g => g.OrderByDescending(a => depth[a.RootOrgNodeId]).First())
             .ToArray();
 
-        await using var platform = store.QuerySession();
+        await using var platform = store.QuerySession(PlatformTenant.Id);
         var snapIds = deepestPerSchema
             .Select(a => ConfigSchemaVersionReadModel.BuildId(a.SchemaCode, a.SchemaVersion))
             .ToArray();

@@ -58,7 +58,8 @@ public static class GrantRoleEndpoint
         else
             await authorization.EnforceRoleAsync(session, actor, target, OrgRole.Admin, ct);
 
-        var subject = await session.LoadAsync<SubjectReadModel>(subjectId.Value, ct);
+        await using var platformQuery = store.QuerySession(PlatformTenant.Id);
+        var subject = await platformQuery.LoadAsync<SubjectReadModel>(subjectId.Value, ct);
         if (subject is null || !subject.Active)
             throw new DomainException("Subject does not exist or is inactive.");
 

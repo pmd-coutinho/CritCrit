@@ -40,7 +40,7 @@ public static class InvitationHandlers
         ActorContext actor,
         CancellationToken ct)
     {
-        await using var platform = store.QuerySession();
+        await using var platform = store.QuerySession(PlatformTenant.Id);
         var query = platform.Query<InvitationReadModel>()
             .Where(x => x.TenantId == tenant.TenantId.Value);
 
@@ -139,7 +139,7 @@ public static class InvitationHandlers
         if (httpContext.User.Identity?.IsAuthenticated != true)
             return Results.Challenge();
 
-        await using var resolveSession = store.QuerySession();
+        await using var resolveSession = store.QuerySession(PlatformTenant.Id);
         var actor = await ActorContextResolver.ResolveAsync(resolveSession, httpContext.User, ct);
         if (!actor.IsAuthenticated)
             throw new DomainException("Authentication required.", 401);
@@ -301,7 +301,7 @@ public static class InvitationHandlers
 
     internal static async Task<InvitationReadModel> LoadInvitationAsync(InvitationId invitationId, IDocumentStore store, CancellationToken ct)
     {
-        await using var query = store.QuerySession();
+        await using var query = store.QuerySession(PlatformTenant.Id);
         return await LoadInvitationAsync(invitationId, query, ct);
     }
 

@@ -1335,7 +1335,7 @@ public class OrgHierarchyTests : ContractTestWithAlba
     {
         for (var i = 0; i < 50; i++)
         {
-            await using var query = DocumentStore.QuerySession();
+            await using var query = DocumentStore.QuerySession("PLATFORM");
             var invitation = await query.LoadAsync<InvitationReadModel>(ParseInvitationGuid(invitationId));
             if (invitation is not null && invitation.Status == status)
                 return new InvitationResponse(
@@ -1381,7 +1381,7 @@ public class OrgHierarchyTests : ContractTestWithAlba
 
     private async Task<SubjectReadModel?> LoadSubjectByEmailAsync(string email)
     {
-        await using var query = DocumentStore.QuerySession();
+        await using var query = DocumentStore.QuerySession("PLATFORM");
         return await query.Query<SubjectReadModel>()
             .Where(x => x.EmailNormalized == email.Trim().ToLowerInvariant())
             .SingleOrDefaultAsync();
@@ -1992,11 +1992,11 @@ public class OrgHierarchyTests : ContractTestWithAlba
         var invitationId = new InvitationId(ParseInvitationGuid(invitation.Id));
 
         // Directly append InvitationExpired to avoid timing issues with ExpireInvitation handler
-        await using var session = DocumentStore.LightweightSession();
+        await using var session = DocumentStore.LightweightSession("PLATFORM");
         session.Events.Append(invitationId.Value, new InvitationExpired(invitationId, TimeProvider.System.GetUtcNow()));
         await session.SaveChangesAsync();
 
-        await using var query = DocumentStore.QuerySession();
+        await using var query = DocumentStore.QuerySession("PLATFORM");
         var after = await query.LoadAsync<InvitationReadModel>(invitationId.Value);
         Assert.NotNull(after);
         Assert.Equal(InvitationStatus.Expired, after.Status);
@@ -2017,7 +2017,7 @@ public class OrgHierarchyTests : ContractTestWithAlba
         var invitationId = new InvitationId(ParseInvitationGuid(invitation.Id));
 
         // Expire the invitation directly
-        await using var expireSession = DocumentStore.LightweightSession();
+        await using var expireSession = DocumentStore.LightweightSession("PLATFORM");
         expireSession.Events.Append(invitationId.Value, new InvitationExpired(invitationId, TimeProvider.System.GetUtcNow()));
         await expireSession.SaveChangesAsync();
 
@@ -2057,7 +2057,7 @@ public class OrgHierarchyTests : ContractTestWithAlba
         // Attempt 3 fails -> InvitationFailed appended
         await bus.InvokeAsync(new RetrySendInvitationEmail(invitationId, false, 3));
 
-        await using var query = DocumentStore.QuerySession();
+        await using var query = DocumentStore.QuerySession("PLATFORM");
         var after = await query.LoadAsync<InvitationReadModel>(invitationId.Value);
         Assert.NotNull(after);
         Assert.Equal(InvitationStatus.Failed, after.Status);

@@ -61,7 +61,8 @@ public static class SetGrantExpirationEndpoint
         var oldExpiresAt = grant.ExpiresAt;
         session.Events.Append(grant.StreamId,
             new OrgAccessExpirationChanged(tenant.TenantId, nodeId, subjectId, oldExpiresAt, request.ExpiresAt));
-        var subject = await session.LoadAsync<SubjectReadModel>(subjectId.Value, ct);
+        await using var platformQuery = store.QuerySession(PlatformTenant.Id);
+        var subject = await platformQuery.LoadAsync<SubjectReadModel>(subjectId.Value, ct);
 
         audit.Record(session, OrgAudit.Record(
             OrgAuditActions.GrantExpirationChanged,

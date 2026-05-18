@@ -163,7 +163,7 @@ public static class CritCritApiConfiguration
             .Index(x => x.Status);
 
         m.Schema.For<SubjectReadModel>()
-            .SingleTenanted()
+            .MultiTenanted()
             .Index(x => x.EmailNormalized)
             .Index(x => x.Active);
         m.Schema.For<ExternalIdentityReadModel>().SingleTenanted();
@@ -181,7 +181,7 @@ public static class CritCritApiConfiguration
             .Index(x => x.SupportId)
             .Index(x => x.OccurredAt);
         m.Schema.For<InvitationReadModel>()
-            .SingleTenanted()
+            .MultiTenanted()
             .Index(x => x.TenantId)
             .Index(x => x.TargetOrgNodeId)
             .Index(x => x.EmailNormalized)
@@ -197,7 +197,7 @@ public static class CritCritApiConfiguration
 
         // ─── Config service ───
         m.Schema.For<ConfigSchemaReadModel>()
-            .SingleTenanted()
+            .MultiTenanted()
             .Index(x => x.CodeNormalized)
             .Index(x => x.Archived);
         m.Schema.For<ConfigSchemaVersionReadModel>()
@@ -205,7 +205,7 @@ public static class CritCritApiConfiguration
             .Index(x => x.SchemaCode)
             .Index(x => x.Version);
         m.Schema.For<ConfigSchemaDraftReadModel>()
-            .SingleTenanted()
+            .MultiTenanted()
             .Index(x => x.SchemaCode)
             .Index(x => x.Archived)
             .Index(x => x.Published);
@@ -241,6 +241,11 @@ public static class CritCritApiConfiguration
         m.Events.EnableEventSkippingInProjectionsOrSubscriptions = true;
         m.Events.UseIdentityMapForAggregates = true;
         m.Events.UseMandatoryStreamTypeDeclaration = true;
+        // Conjoined-tenancy unlocks SingleStreamProjection for MultiTenanted
+        // aggregates (Org / AccessGrant / ConfigAssignment / ConfigNodeValue /
+        // AssetNodeValue). Platform-scoped streams use the PlatformTenant
+        // sentinel. See .scratch/event-store-tenancy/PRD.md.
+        m.Events.TenancyStyle = Marten.Storage.TenancyStyle.Conjoined;
     }
 
     private static IServiceCollection AddCritCritObservability(this IServiceCollection services)

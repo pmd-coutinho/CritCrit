@@ -21,7 +21,7 @@ public static class ConfigSchemaHandlers
     {
         authorization.EnforceSuperAdmin(actor);
 
-        await using var session = store.QuerySession();
+        await using var session = store.QuerySession(PlatformTenant.Id);
         var query = session.Query<ConfigSchemaReadModel>();
 
         var rows = includeArchived == true
@@ -41,7 +41,7 @@ public static class ConfigSchemaHandlers
     {
         authorization.EnforceSuperAdmin(actor);
 
-        await using var session = store.QuerySession();
+        await using var session = store.QuerySession(PlatformTenant.Id);
         var schema = await LoadSchemaByCodeAsync(session, schemaCode, ct);
         return schema is null
             ? Results.NotFound()
@@ -196,7 +196,7 @@ public static class ConfigSchemaHandlers
     {
         authorization.EnforceSuperAdmin(actor);
 
-        await using var session = store.QuerySession();
+        await using var session = store.QuerySession(PlatformTenant.Id);
         var code = ConfigCode.Normalize(schemaCode);
         var rows = await session.Query<ConfigSchemaVersionReadModel>()
             .Where(x => x.SchemaCode == code)
@@ -218,7 +218,7 @@ public static class ConfigSchemaHandlers
     {
         authorization.EnforceSuperAdmin(actor);
 
-        await using var session = store.QuerySession();
+        await using var session = store.QuerySession(PlatformTenant.Id);
         var v = await session.LoadAsync<ConfigSchemaVersionReadModel>(
             ConfigSchemaVersionReadModel.BuildId(ConfigCode.Normalize(schemaCode), version), ct);
         return v is null
@@ -238,7 +238,7 @@ public static class ConfigSchemaHandlers
     {
         authorization.EnforceSuperAdmin(actor);
 
-        await using var session = store.QuerySession();
+        await using var session = store.QuerySession(PlatformTenant.Id);
         var code = ConfigCode.Normalize(schemaCode);
         var rows = await session.Query<ConfigSchemaDraftReadModel>()
             .Where(x => x.SchemaCode == code)
@@ -258,7 +258,7 @@ public static class ConfigSchemaHandlers
     {
         authorization.EnforceSuperAdmin(actor);
 
-        await using var session = store.QuerySession();
+        await using var session = store.QuerySession(PlatformTenant.Id);
         var draft = await session.LoadAsync<ConfigSchemaDraftReadModel>(draftId, ct);
         if (draft is null || draft.SchemaCode != ConfigCode.Normalize(schemaCode))
             return Results.NotFound();

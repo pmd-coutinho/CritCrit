@@ -60,7 +60,8 @@ public static class AccessGrantHandlers
                     403);
         }
 
-        var subject = await session.LoadAsync<SubjectReadModel>(subjectId.Value, ct);
+        await using var platformQuery = store.QuerySession(PlatformTenant.Id);
+        var subject = await platformQuery.LoadAsync<SubjectReadModel>(subjectId.Value, ct);
 
         session.Events.Append(grant.StreamId,
             new OrgAccessRevoked(tenant.TenantId, nodeId, subjectId, OrgAccessRevokedReason.UserRequested));
@@ -115,7 +116,7 @@ public static class AccessGrantHandlers
                 .ToListAsync(ct))
             .ToDictionary(n => n.Id);
 
-        await using var platform = store.QuerySession();
+        await using var platform = store.QuerySession(PlatformTenant.Id);
         var subjects = (await platform.Query<SubjectReadModel>()
                 .Where(s => subjectIds.Contains(s.Id))
                 .ToListAsync(ct))

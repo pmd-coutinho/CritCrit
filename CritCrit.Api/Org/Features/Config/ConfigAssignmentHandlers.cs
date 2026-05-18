@@ -68,7 +68,7 @@ public static class ConfigAssignmentHandlers
             throw new DomainException("Cannot assign config to an inactive or missing org node.");
 
         // Schema + version must be live on the platform side.
-        await using var platformSession = store.QuerySession();
+        await using var platformSession = store.QuerySession(PlatformTenant.Id);
         var schemaCode = ConfigCode.Normalize(request.SchemaCode);
         var schema = await platformSession.Query<ConfigSchemaReadModel>()
             .Where(x => x.CodeNormalized == schemaCode)
@@ -385,7 +385,7 @@ public static class ConfigAssignmentHandlers
         if (assignment.TenantId != tenant.TenantId.Value)
             throw new DomainException("Assignment does not belong to this brand tenant.");
 
-        await using var platform = store.QuerySession();
+        await using var platform = store.QuerySession(PlatformTenant.Id);
         var current = await platform.LoadAsync<ConfigSchemaVersionReadModel>(
             ConfigSchemaVersionReadModel.BuildId(assignment.SchemaCode, assignment.SchemaVersion), ct)
             ?? throw new DomainException("Current schema version snapshot missing.", 404);

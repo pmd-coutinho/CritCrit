@@ -13,5 +13,8 @@ public static class SessionFactory
         store.LightweightSession(tenant.TenantId.Value.ToString());
 
     public static IDocumentSession PlatformSession(IDocumentStore store) =>
-        store.LightweightSession();
+        store.LightweightSession(PlatformTenant.Id);
+
+    public static IQuerySession PlatformQuerySession(IDocumentStore store) =>
+        store.QuerySession(PlatformTenant.Id);
 }

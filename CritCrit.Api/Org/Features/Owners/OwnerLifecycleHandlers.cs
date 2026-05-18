@@ -45,8 +45,9 @@ public static class GrantOwnerEndpoint
             throw new DomainException("Invalid subject ID.");
 
         await using var query = store.QuerySession(tenant.TenantId.Value.ToString());
+        await using var platformQuery = store.QuerySession(PlatformTenant.Id);
         var root = await OrgValidation.LoadActiveNodeAsync(query, tenant.TenantId, ct);
-        var subject = await query.LoadAsync<SubjectReadModel>(subjectId.Value, ct);
+        var subject = await platformQuery.LoadAsync<SubjectReadModel>(subjectId.Value, ct);
         var grantId = OrgAccessGrantReadModel.BuildId(tenant.TenantId, tenant.TenantId, subjectId);
         var grant = await query.LoadAsync<OrgAccessGrantReadModel>(grantId, ct);
         return new GrantOwnerContext(subjectId, root, subject, grant);
@@ -157,9 +158,10 @@ public static class DowngradeOwnerEndpoint
         CancellationToken ct)
     {
         await using var query = store.QuerySession(tenant.TenantId.Value.ToString());
+        await using var platformQuery = store.QuerySession(PlatformTenant.Id);
         var grantId = OrgAccessGrantReadModel.BuildId(tenant.TenantId, tenant.TenantId, subjectId);
         var grant = await query.LoadAsync<OrgAccessGrantReadModel>(grantId, ct);
-        var subject = await query.LoadAsync<SubjectReadModel>(subjectId.Value, ct);
+        var subject = await platformQuery.LoadAsync<SubjectReadModel>(subjectId.Value, ct);
         return new OwnerTransitionContext(subjectId, grant, subject);
     }
 
@@ -231,9 +233,10 @@ public static class RevokeOwnerEndpoint
         CancellationToken ct)
     {
         await using var query = store.QuerySession(tenant.TenantId.Value.ToString());
+        await using var platformQuery = store.QuerySession(PlatformTenant.Id);
         var grantId = OrgAccessGrantReadModel.BuildId(tenant.TenantId, tenant.TenantId, subjectId);
         var grant = await query.LoadAsync<OrgAccessGrantReadModel>(grantId, ct);
-        var subject = await query.LoadAsync<SubjectReadModel>(subjectId.Value, ct);
+        var subject = await platformQuery.LoadAsync<SubjectReadModel>(subjectId.Value, ct);
         return new OwnerTransitionContext(subjectId, grant, subject);
     }
 

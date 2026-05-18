@@ -32,7 +32,7 @@ public sealed class SubjectLifecycleTests(ApiFixture fixture) : IntegrationTestB
             _.StatusCodeShouldBe(HttpStatusCode.NoContent);
         });
 
-        await using var platform = DocumentStore.QuerySession();
+        await using var platform = DocumentStore.QuerySession("PLATFORM");
         var loaded = await platform.LoadAsync<SubjectReadModel>(ParseSubjectGuid(subject.Id));
         Assert.NotNull(loaded);
         Assert.False(loaded!.Active);
@@ -74,7 +74,7 @@ public sealed class SubjectLifecycleTests(ApiFixture fixture) : IntegrationTestB
             _.StatusCodeShouldBe(HttpStatusCode.NoContent);
         });
 
-        await using var platform = DocumentStore.QuerySession();
+        await using var platform = DocumentStore.QuerySession("PLATFORM");
         var loaded = await platform.LoadAsync<SubjectReadModel>(ParseSubjectGuid(subject.Id));
         Assert.True(loaded!.Active);
 
