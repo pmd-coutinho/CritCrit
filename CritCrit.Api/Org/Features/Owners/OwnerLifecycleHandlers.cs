@@ -3,6 +3,7 @@ using CritCrit.Api.Org.Domain;
 using CritCrit.Api.Org.Endpoints;
 using CritCrit.Api.Org.Features.Invitations;
 using CritCrit.Api.Org.Infrastructure;
+using CritCrit.Api.Platform;
 using Marten;
 using Microsoft.AspNetCore.Mvc;
 using Wolverine.Http;
@@ -103,7 +104,11 @@ public static class GrantOwnerEndpoint
             return Results.Ok(new GrantResponse(updated.Id, brandId, request.SubjectId, updated.Role, updated.ExpiresAt));
         }
 
-        var streamId = Guid.CreateVersion7();
+        // Deterministic stream id per .scratch/deterministic-stream-ids/PRD.md.
+        // Existing grants from before this migration still carry random ids on
+        // their docs; that branch above (loaded.Grant is { Status: Active })
+        // honours them via loaded.Grant.StreamId.
+        var streamId = DeterministicGuid.From(tenant.TenantId.Value, tenant.TenantId.Value, loaded.SubjectId.Value);
         session.Events.StartStream<OrgAccessGrantReadModel>(streamId,
             new OrgAccessGranted(tenant.TenantId, tenant.TenantId, loaded.SubjectId, OrgRole.Owner, null, OrgAccessGrantSource.DirectGrant, null));
 
