@@ -3,6 +3,22 @@
 Status: **PARTIALLY SHIPPED — transitional shape only** (was design-locked)
 Shipped commits: 2eaef61 (Owner pilot), 586b18a (Brand pilot)
 
+## Shipped — `[WriteAggregate]` adoptions
+
+- `ArchiveConfigDraftEndpoint` (commit 462e744) — first real adoption.
+- `UpdateConfigDraftEndpoint` (commit 23a164f) — second adoption.
+
+Both target ConfigSchemaDraft (single-stream + raw Guid route + draft is SingleTenanted-under-PLATFORM-tenant). Pattern proven:
+
+- `[WriteAggregate("draftId")] IEventStream<ConfigSchemaDraftReadModel> stream` — Wolverine hands the FetchForWriting result, no manual session.
+- `stream.AppendOne(event)` — Wolverine commits events + manages doc snapshot.
+- `IDocumentSession session` parameter shares the session with the stream so `audit.Record(session, ...)` still participates in the same transaction.
+- Zero `IDocumentStore`, `SessionFactory.PlatformSession`, `session.Events.Append`, `await session.SaveChangesAsync(ct)` calls in the handler.
+
+Remaining `[WriteAggregate]` candidates blocked on:
+- **Prereq 6** (public-id routes) for Subject, Invitation, Owner, Brand, OrgNode, Access endpoints.
+- **Custom `Version` field / `UseIdentityMapForAggregates` clash** discovered while attempting ConfigAssignment SingleStream migration — blocks any aggregate using a custom `long Version` property pending Marten research.
+
 ## Shipped — transitional pattern
 
 The Owner and Brand pilots ship a transitional shape that captures the *testability and locality* wins without yet using `[AggregateHandler]`:
@@ -22,7 +38,7 @@ The decide-fn-purity centerpiece (no `IDocumentStore`, no inline `Events.Append/
 2. ✅ `IParsable<T>` on strong-typed IDs — shipped
 3. ✅ Per-endpoint class shape — shipped
 4. 🟡 **`SingleStreamProjection<T>` per aggregate** — done for single-tenanted aggregates (ConfigSchema family, Subject, Invitation); blocked for multi-tenanted aggregates by prereq 5
-5. ❌ **Conjoined event-store tenancy (`m.Events.TenancyStyle = TenancyStyle.Conjoined`)** — required to bridge SingleStreamProjection with multi-tenanted doc types. Schema migration + backfill required. Multi-tenanted aggregates: OrgNode, OrgAccessGrant, ConfigAssignment, ConfigNodeValue, AssetNodeValue.
+5. ✅ **Conjoined event-store tenancy** — shipped (commit fb0b333). `m.Events.TenancyStyle = TenancyStyle.Conjoined`; platform-scoped docs use `PlatformTenant.Id = "PLATFORM"` sentinel. Multi-tenanted aggregates now eligible for SingleStreamProjection in principle. See `.scratch/event-store-tenancy/PRD.md`.
 6. ❌ **Raw-Guid route param OR strong-typed-id Marten registration** — Wolverine `[WriteAggregate("argName")]` only Guid-parses the route value; it does not unwrap public-id strings via SubjectId/InvitationId TryParse. See `.scratch/deterministic-stream-ids/PRD.md` "Prereq 6". `ArchiveConfigDraftEndpoint` (commit 462e744) works because its route is `{draftId}` raw Guid; Subject and Invitation endpoints with public-id routes fail at runtime with 404.
 
 Pending (after prereqs 4–6):

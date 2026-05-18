@@ -1,5 +1,28 @@
 # Conjoined Event-Store Tenancy
 
+Status: **SHIPPED** — commit fb0b333
+
+## Shipped
+
+Conjoined event-store tenancy enabled. 124/124 integration tests green.
+
+- `m.Events.TenancyStyle = Marten.Storage.TenancyStyle.Conjoined` in `CritCritApiConfiguration.ConfigureEventStore`
+- `PlatformTenant.Id = "PLATFORM"` sentinel in `CritCrit.Api/Platform/Tenancy/PlatformTenant.cs`
+- `SessionFactory.PlatformSession(store)` returns a session tenanted to `"PLATFORM"`; new `PlatformQuerySession` helper added
+- Doc tenancy switches: `SubjectReadModel`, `InvitationReadModel`, `ConfigSchemaReadModel`, `ConfigSchemaDraftReadModel` → `MultiTenanted()`
+- Cross-tenant lookup pattern: brand-tenanted handlers that touch a platform-scoped doc open a parallel `store.QuerySession(PlatformTenant.Id)`. Applied at the ~10 surgical sites (Owner LoadAsync × 3, AccessGrant Revoke + List, GrantRole, SetGrantExpiration, plus Subject/Invitation/Config platform reads).
+- Test code adjusted to query platform docs via `DocumentStore.QuerySession("PLATFORM")` and append platform events via `LightweightSession("PLATFORM")`.
+
+Unlocked aggregates for `SingleStreamProjection<T>` + `[WriteAggregate]`:
+`ConfigAssignmentReadModel`, `OrgNodeReadModel`, `OrgAccessGrantReadModel`, `ConfigNodeValueReadModel`, `AssetNodeValueReadModel`.
+
+## Caveats discovered
+
+1. **`ConfigAssignmentReadModel` SingleStream blocked by `Version` field interaction.** First migration attempt regressed the `archived_then_restored_assignment_cycle_works` test (doc.Version returned 0 after archive instead of 2). Suspected `UseIdentityMapForAggregates` + custom `Version` field clash. Needs deeper Marten research before retry — left as `EventProjection`.
+2. **Production data migration not addressed.** Tests run against fresh containers so no backfill needed. Production deployments still need a one-shot `tenant_id` backfill on `mt_events` / `mt_streams` and on the four newly-MultiTenanted doc tables.
+
+## Original design (pre-attempt)
+
 Status: **DESIGN — full attempt iterated to 50→40 failures then reverted**
 Triage: ready-for-human
 Driver: projection-cleanup pilot discovery (commit fec84b1, ConfigAssignment migration attempt) + full attempt iteration (reverted)
