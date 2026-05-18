@@ -1,9 +1,35 @@
 # Conjoined Event-Store Tenancy
 
-Status: design
+Status: **DESIGN — flip attempted, reverted** (deeper than originally scoped)
 Triage: ready-for-human
 Driver: projection-cleanup pilot discovery (commit fec84b1, ConfigAssignment migration attempt)
 Unblocks: `SingleStreamProjection<T>` for multi-tenanted aggregates → `[AggregateHandler]` adoption on Org / AccessGrant / Config / Asset write models
+
+## Attempted flip (1e0f907 follow-up, reverted)
+
+Setting `m.Events.TenancyStyle = Marten.Storage.TenancyStyle.Conjoined` against the existing test schema produces:
+
+```
+InvalidProjectionException : Tenancy storage style mismatch between the events
+(Conjoined) and the aggregate type SubjectReadModel (Single)
+Tenancy storage style mismatch between the events (Conjoined) and the aggregate
+type InvitationReadModel (Single)
+Tenancy storage style mismatch between the events (Conjoined) and the aggregate
+type ConfigSchemaReadModel (Single)
+Tenancy storage style mismatch between the events (Conjoined) and the aggregate
+type ConfigSchemaDraftReadModel (Single)
+```
+
+The flip is bidirectional: making events Conjoined forces *every* SingleStreamProjection to also be Conjoined-tenanted. SubjectReadModel, InvitationReadModel, ConfigSchemaReadModel, ConfigSchemaDraftReadModel are currently `SingleTenanted()` (platform-scoped — no per-brand isolation needed). They would all need to switch to MultiTenanted with a sentinel tenant id (Guid.Empty or "platform") for platform-scoped streams.
+
+Scope is larger than originally outlined:
+
+- 5 multi-tenanted aggregates gain SingleStreamProjection eligibility
+- 4 single-tenanted aggregates **lose** their current shape and need migration to a platform-tenant placeholder
+- Every `SessionFactory.PlatformSession(store)` callsite (subject lifecycle, invitation lifecycle, schema lifecycle, audit denied path) needs explicit platform-tenant binding
+- Backfill `tenant_id` on existing `mt_events`/`mt_streams` rows (production data migration)
+
+The conjoined-tenancy migration is a separate multi-day initiative.
 
 ## Problem
 
