@@ -4,17 +4,59 @@ using CritCrit.Api.Org.Endpoints;
 using CritCrit.Api.Org.Features.Invitations;
 using CritCrit.Api.Org.Infrastructure;
 using Marten;
+using Microsoft.AspNetCore.Mvc;
 using Wolverine.Http;
 using Wolverine.Marten;
 
 namespace CritCrit.Api.Org.Features.Owners;
 
-public static class OwnerLifecycleHandlers
+// Refactor wave 1 (per .scratch/aggregate-handler-workflow/issues/01-owner-pilot.md):
+// each Owner endpoint lives in its own static class so Wolverine.Http can dispatch
+// the convention methods `Validate` and `LoadAsync` per endpoint without overload
+// collisions. Pure invariants are in `OwnerRules`. Session-opening and event
+// emission remain inline pending the deterministic-stream-ids prerequisite that
+// unlocks `[AggregateHandler]`.
+
+public sealed record GrantOwnerContext(
+    SubjectId SubjectId,
+    OrgNodeReadModel Root,
+    SubjectReadModel? Subject,
+    OrgAccessGrantReadModel? Grant);
+
+public sealed record OwnerTransitionContext(
+    SubjectId SubjectId,
+    OrgAccessGrantReadModel? Grant,
+    SubjectReadModel? Subject);
+
+public static class GrantOwnerEndpoint
 {
+    public static ProblemDetails Validate(GrantOwnerRequest request) =>
+        string.IsNullOrWhiteSpace(request.SubjectId)
+            ? new ProblemDetails { Title = "subjectId", Detail = "SubjectId is required.", Status = 400 }
+            : WolverineContinue.NoProblems;
+
+    public static async Task<GrantOwnerContext> LoadAsync(
+        GrantOwnerRequest request,
+        IDocumentStore store,
+        BrandTenantContext tenant,
+        CancellationToken ct)
+    {
+        if (!OrgPublicId.TryParseSubject(request.SubjectId, out var subjectId))
+            throw new DomainException("Invalid subject ID.");
+
+        await using var query = store.QuerySession(tenant.TenantId.Value.ToString());
+        var root = await OrgValidation.LoadActiveNodeAsync(query, tenant.TenantId, ct);
+        var subject = await query.LoadAsync<SubjectReadModel>(subjectId.Value, ct);
+        var grantId = OrgAccessGrantReadModel.BuildId(tenant.TenantId, tenant.TenantId, subjectId);
+        var grant = await query.LoadAsync<OrgAccessGrantReadModel>(grantId, ct);
+        return new GrantOwnerContext(subjectId, root, subject, grant);
+    }
+
     [WolverinePost("/api/brands/{brandId}/owners")]
-    public static async Task<IResult> GrantOwner(
+    public static async Task<IResult> Handle(
         GrantOwnerRequest request,
         string brandId,
+        GrantOwnerContext loaded,
         IDocumentStore store,
         OrgAuthorizationService authorization,
         IMartenOutbox outbox,
@@ -23,36 +65,24 @@ public static class OwnerLifecycleHandlers
         ActorContext actor,
         CancellationToken ct)
     {
+        authorization.EnforceSuperAdmin(actor);
+        OwnerRules.RequireBrandRoot(loaded.Root);
+        OwnerRules.RequireActiveSubject(loaded.Subject);
+
+        var now = TimeProvider.System.GetUtcNow();
+        if (await authorization.WouldBeRedundantAsync(store.QuerySession(), loaded.Root, loaded.SubjectId, OrgRole.Owner, now, ct))
+            throw new DomainException("Grant would be redundant with inherited access.");
+
         await using var session = SessionFactory.TenantSession(store, tenant);
         SessionMetadata.StampActor(session, actor);
         outbox.Enroll(session);
-        authorization.EnforceSuperAdmin(actor);
 
-        if (!OrgPublicId.TryParseSubject(request.SubjectId, out var subjectId))
-            throw new DomainException("Invalid subject ID.");
-
-        var root = await OrgValidation.LoadActiveNodeAsync(session, tenant.TenantId, ct);
-        if (root.Type != OrgNodeType.Brand)
-            throw new DomainException("Owner can only be granted at the brand root.");
-
-        var subject = await session.LoadAsync<SubjectReadModel>(subjectId.Value, ct);
-        if (subject is null || !subject.Active)
-            throw new DomainException("Subject does not exist or is inactive.");
-
-        var now = TimeProvider.System.GetUtcNow();
-        if (await authorization.WouldBeRedundantAsync(session, root, subjectId, OrgRole.Owner, now, ct))
-            throw new DomainException("Grant would be redundant with inherited access.");
-
-        var id = OrgAccessGrantReadModel.BuildId(tenant.TenantId, tenant.TenantId, subjectId);
-        var grant = await session.LoadAsync<OrgAccessGrantReadModel>(id, ct);
-
-        if (grant is { Status: OrgAccessGrantStatus.Active })
+        if (loaded.Grant is { Status: OrgAccessGrantStatus.Active })
         {
-            if (grant.Role == OrgRole.Owner)
-                throw new DomainException("Equivalent direct owner grant already exists.");
+            OwnerRules.RequireNotAlreadyOwner(loaded.Grant);
 
-            session.Events.Append(grant.StreamId,
-                new OrgAccessRoleChanged(tenant.TenantId, tenant.TenantId, subjectId, grant.Role, OrgRole.Owner));
+            session.Events.Append(loaded.Grant.StreamId,
+                new OrgAccessRoleChanged(tenant.TenantId, tenant.TenantId, loaded.SubjectId, loaded.Grant.Role, OrgRole.Owner));
 
             audit.Record(session, OrgAudit.Record(
                 OrgAuditActions.OwnerGranted,
@@ -61,20 +91,21 @@ public static class OwnerLifecycleHandlers
                 actor,
                 tenant.TenantId.Value,
                 tenant.TenantId.Value,
-                details: new { SubjectId = subject.PublicId, SubjectEmailMasked = AuditIdentity.MaskEmail(subject.Email) },
-                subjectId: subject.Id,
-                changes: [new AuditFieldChange("role", grant.Role.ToString(), OrgRole.Owner.ToString())],
+                details: new { SubjectId = loaded.Subject!.PublicId, SubjectEmailMasked = AuditIdentity.MaskEmail(loaded.Subject.Email) },
+                subjectId: loaded.Subject.Id,
+                changes: [new AuditFieldChange("role", loaded.Grant.Role.ToString(), OrgRole.Owner.ToString())],
                 targetPublicId: brandId,
                 targetType: "brand"));
 
             await session.SaveChangesAsync(ct);
-            var updated = await session.LoadAsync<OrgAccessGrantReadModel>(id, ct);
-            return Results.Ok(new GrantResponse(updated!.Id, brandId, request.SubjectId, updated.Role, updated.ExpiresAt));
+            var updated = await session.LoadAsync<OrgAccessGrantReadModel>(loaded.Grant.Id, ct)
+                ?? throw new InvalidOperationException("Projection failed to update OrgAccessGrantReadModel.");
+            return Results.Ok(new GrantResponse(updated.Id, brandId, request.SubjectId, updated.Role, updated.ExpiresAt));
         }
 
         var streamId = Guid.CreateVersion7();
         session.Events.StartStream<OrgAccessGrantReadModel>(streamId,
-            new OrgAccessGranted(tenant.TenantId, tenant.TenantId, subjectId, OrgRole.Owner, null, OrgAccessGrantSource.DirectGrant, null));
+            new OrgAccessGranted(tenant.TenantId, tenant.TenantId, loaded.SubjectId, OrgRole.Owner, null, OrgAccessGrantSource.DirectGrant, null));
 
         audit.Record(session, OrgAudit.Record(
             OrgAuditActions.OwnerGranted,
@@ -83,28 +114,60 @@ public static class OwnerLifecycleHandlers
             actor,
             tenant.TenantId.Value,
             tenant.TenantId.Value,
-            details: new { SubjectId = subject.PublicId, SubjectEmailMasked = AuditIdentity.MaskEmail(subject.Email) },
-            subjectId: subject.Id,
+            details: new { SubjectId = loaded.Subject!.PublicId, SubjectEmailMasked = AuditIdentity.MaskEmail(loaded.Subject.Email) },
+            subjectId: loaded.Subject.Id,
             changes: [new AuditFieldChange("role", null, OrgRole.Owner.ToString())],
             targetPublicId: brandId,
             targetType: "brand"));
 
-        // Trigger redundant cleanup for the newly granted owner role
-        await outbox.PublishAsync(new CleanupRedundantGrants(tenant.TenantId, tenant.TenantId, subjectId, OrgRole.Owner));
+        await outbox.PublishAsync(new CleanupRedundantGrants(tenant.TenantId, tenant.TenantId, loaded.SubjectId, OrgRole.Owner));
 
         await session.SaveChangesAsync(ct);
-        var created = await session.LoadAsync<OrgAccessGrantReadModel>(id, ct)
+        var grantDocId = OrgAccessGrantReadModel.BuildId(tenant.TenantId, tenant.TenantId, loaded.SubjectId);
+        var created = await session.LoadAsync<OrgAccessGrantReadModel>(grantDocId, ct)
             ?? throw new InvalidOperationException("Projection failed to create OrgAccessGrantReadModel.");
 
-        return Results.Created($"/api/brands/{brandId}/access-grants/{id}",
+        return Results.Created($"/api/brands/{brandId}/access-grants/{grantDocId}",
             new GrantResponse(created.Id, brandId, request.SubjectId, created.Role, created.ExpiresAt));
+    }
+}
+
+public static class DowngradeOwnerEndpoint
+{
+    public static ProblemDetails Validate(DowngradeOwnerRequest request)
+    {
+        if (request.NewRole == OrgRole.Owner)
+            return new ProblemDetails { Title = "newRole", Detail = "Downgrade target role cannot be Owner.", Status = 400 };
+        if (string.IsNullOrWhiteSpace(request.Reason))
+            return new ProblemDetails { Title = "reason", Detail = "Reason is required.", Status = 400 };
+        if (request.Reason.Length > 500)
+            return new ProblemDetails { Title = "reason", Detail = "Reason must be 500 characters or fewer.", Status = 400 };
+        return WolverineContinue.NoProblems;
+    }
+
+    public static async Task<OwnerTransitionContext> LoadAsync(
+        DowngradeOwnerRequest request,
+        string subjectId,
+        IDocumentStore store,
+        BrandTenantContext tenant,
+        CancellationToken ct)
+    {
+        if (!OrgPublicId.TryParseSubject(subjectId, out var parsedSubjectId))
+            throw new DomainException("Invalid subject ID.");
+
+        await using var query = store.QuerySession(tenant.TenantId.Value.ToString());
+        var grantId = OrgAccessGrantReadModel.BuildId(tenant.TenantId, tenant.TenantId, parsedSubjectId);
+        var grant = await query.LoadAsync<OrgAccessGrantReadModel>(grantId, ct);
+        var subject = await query.LoadAsync<SubjectReadModel>(parsedSubjectId.Value, ct);
+        return new OwnerTransitionContext(parsedSubjectId, grant, subject);
     }
 
     [WolverinePost("/api/brands/{brandId}/owners/{subjectId}/downgrade")]
-    public static async Task<GrantResponse> DowngradeOwner(
+    public static async Task<GrantResponse> Handle(
         DowngradeOwnerRequest request,
         string brandId,
         string subjectId,
+        OwnerTransitionContext loaded,
         IDocumentStore store,
         OrgAuthorizationService authorization,
         IMartenOutbox outbox,
@@ -113,28 +176,16 @@ public static class OwnerLifecycleHandlers
         ActorContext actor,
         CancellationToken ct)
     {
+        authorization.EnforceSuperAdmin(actor);
+        OwnerRules.RequireDowngradeTarget(request.NewRole);
+        OwnerRules.RequireActiveOwnerGrant(loaded.Grant);
+
         await using var session = SessionFactory.TenantSession(store, tenant);
         SessionMetadata.StampActor(session, actor);
         outbox.Enroll(session);
-        authorization.EnforceSuperAdmin(actor);
 
-        if (!OrgPublicId.TryParseSubject(subjectId, out var parsedSubjectId))
-            throw new DomainException("Invalid subject ID.");
-
-        if (request.NewRole == OrgRole.Owner)
-            throw new DomainException("Downgrade cannot target Owner role.");
-        if (!OrgRules.CanGrantRoleAt(request.NewRole, OrgNodeType.Brand))
-            throw new DomainException($"{request.NewRole} can only be granted at the Brand root.");
-
-        var id = OrgAccessGrantReadModel.BuildId(tenant.TenantId, tenant.TenantId, parsedSubjectId);
-        var grant = await session.LoadAsync<OrgAccessGrantReadModel>(id, ct);
-        if (grant is not { Status: OrgAccessGrantStatus.Active, Role: OrgRole.Owner })
-            throw new DomainException("Active owner grant not found.");
-
-        var subject = await session.LoadAsync<SubjectReadModel>(parsedSubjectId.Value, ct);
-
-        session.Events.Append(grant.StreamId,
-            new OrgAccessRoleChanged(tenant.TenantId, tenant.TenantId, parsedSubjectId, OrgRole.Owner, request.NewRole));
+        session.Events.Append(loaded.Grant!.StreamId,
+            new OrgAccessRoleChanged(tenant.TenantId, tenant.TenantId, loaded.SubjectId, OrgRole.Owner, request.NewRole));
 
         audit.Record(session, OrgAudit.Record(
             OrgAuditActions.OwnerDowngraded,
@@ -144,29 +195,56 @@ public static class OwnerLifecycleHandlers
             tenant.TenantId.Value,
             tenant.TenantId.Value,
             request.Reason,
-            new { SubjectId = subject?.PublicId, SubjectEmailMasked = AuditIdentity.MaskEmail(subject?.Email) },
-            subjectId: subject?.Id,
+            new { SubjectId = loaded.Subject?.PublicId, SubjectEmailMasked = AuditIdentity.MaskEmail(loaded.Subject?.Email) },
+            subjectId: loaded.Subject?.Id,
             changes: [new AuditFieldChange("role", OrgRole.Owner.ToString(), request.NewRole.ToString())],
             targetPublicId: brandId,
             targetType: "brand"));
 
-        // After downgrade, descendant grants that were redundant may no longer be redundant.
-        // We do not auto-restore them; explicit re-grant is required.
-        // But if the new role is stronger than some descendants, we should clean up those descendants.
-        await outbox.PublishAsync(new CleanupRedundantGrants(tenant.TenantId, tenant.TenantId, parsedSubjectId, request.NewRole));
+        await outbox.PublishAsync(new CleanupRedundantGrants(tenant.TenantId, tenant.TenantId, loaded.SubjectId, request.NewRole));
 
         await session.SaveChangesAsync(ct);
-        var updated = await session.LoadAsync<OrgAccessGrantReadModel>(id, ct)
+        var updated = await session.LoadAsync<OrgAccessGrantReadModel>(loaded.Grant.Id, ct)
             ?? throw new InvalidOperationException("Projection failed to update OrgAccessGrantReadModel.");
 
         return new GrantResponse(updated.Id, brandId, subjectId, updated.Role, updated.ExpiresAt);
     }
+}
+
+public static class RevokeOwnerEndpoint
+{
+    public static ProblemDetails Validate(RevokeOwnerRequest request)
+    {
+        if (string.IsNullOrWhiteSpace(request.Reason))
+            return new ProblemDetails { Title = "reason", Detail = "Reason is required.", Status = 400 };
+        if (request.Reason.Length > 500)
+            return new ProblemDetails { Title = "reason", Detail = "Reason must be 500 characters or fewer.", Status = 400 };
+        return WolverineContinue.NoProblems;
+    }
+
+    public static async Task<OwnerTransitionContext> LoadAsync(
+        RevokeOwnerRequest request,
+        string subjectId,
+        IDocumentStore store,
+        BrandTenantContext tenant,
+        CancellationToken ct)
+    {
+        if (!OrgPublicId.TryParseSubject(subjectId, out var parsedSubjectId))
+            throw new DomainException("Invalid subject ID.");
+
+        await using var query = store.QuerySession(tenant.TenantId.Value.ToString());
+        var grantId = OrgAccessGrantReadModel.BuildId(tenant.TenantId, tenant.TenantId, parsedSubjectId);
+        var grant = await query.LoadAsync<OrgAccessGrantReadModel>(grantId, ct);
+        var subject = await query.LoadAsync<SubjectReadModel>(parsedSubjectId.Value, ct);
+        return new OwnerTransitionContext(parsedSubjectId, grant, subject);
+    }
 
     [WolverinePost("/api/brands/{brandId}/owners/{subjectId}/revoke")]
-    public static async Task<IResult> RevokeOwner(
+    public static async Task<IResult> Handle(
         RevokeOwnerRequest request,
         string brandId,
         string subjectId,
+        OwnerTransitionContext loaded,
         IDocumentStore store,
         OrgAuthorizationService authorization,
         IAuditWriter audit,
@@ -174,22 +252,14 @@ public static class OwnerLifecycleHandlers
         ActorContext actor,
         CancellationToken ct)
     {
+        authorization.EnforceSuperAdmin(actor);
+        OwnerRules.RequireActiveOwnerGrant(loaded.Grant);
+
         await using var session = SessionFactory.TenantSession(store, tenant);
         SessionMetadata.StampActor(session, actor);
-        authorization.EnforceSuperAdmin(actor);
 
-        if (!OrgPublicId.TryParseSubject(subjectId, out var parsedSubjectId))
-            throw new DomainException("Invalid subject ID.");
-
-        var id = OrgAccessGrantReadModel.BuildId(tenant.TenantId, tenant.TenantId, parsedSubjectId);
-        var grant = await session.LoadAsync<OrgAccessGrantReadModel>(id, ct);
-        if (grant is not { Status: OrgAccessGrantStatus.Active, Role: OrgRole.Owner })
-            throw new DomainException("Active owner grant not found.");
-
-        var subject = await session.LoadAsync<SubjectReadModel>(parsedSubjectId.Value, ct);
-
-        session.Events.Append(grant.StreamId,
-            new OrgAccessRevoked(tenant.TenantId, tenant.TenantId, parsedSubjectId, OrgAccessRevokedReason.UserRequested));
+        session.Events.Append(loaded.Grant!.StreamId,
+            new OrgAccessRevoked(tenant.TenantId, tenant.TenantId, loaded.SubjectId, OrgAccessRevokedReason.UserRequested));
 
         audit.Record(session, OrgAudit.Record(
             OrgAuditActions.OwnerRevoked,
@@ -199,8 +269,8 @@ public static class OwnerLifecycleHandlers
             tenant.TenantId.Value,
             tenant.TenantId.Value,
             request.Reason,
-            new { SubjectId = subject?.PublicId, SubjectEmailMasked = AuditIdentity.MaskEmail(subject?.Email) },
-            subjectId: subject?.Id,
+            new { SubjectId = loaded.Subject?.PublicId, SubjectEmailMasked = AuditIdentity.MaskEmail(loaded.Subject?.Email) },
+            subjectId: loaded.Subject?.Id,
             targetPublicId: brandId,
             targetType: "brand"));
 
