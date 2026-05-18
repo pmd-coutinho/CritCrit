@@ -265,6 +265,9 @@ public static class CritCritApiConfiguration
         m.Projections.Add<BrandIndexProjection>(ProjectionLifecycle.Inline);
         m.Projections.Add<SubjectBrandAccessProjection>(ProjectionLifecycle.Inline);
         m.Projections.Add<ConfigSchemaProjection>(ProjectionLifecycle.Inline);
+        m.Projections.Add<ConfigSchemaDraftProjection>(ProjectionLifecycle.Inline);
+        m.Projections.Add<ConfigSchemaVersionProjection>(ProjectionLifecycle.Inline);
+        m.Projections.Add<ConfigSchemaDraftPublishedTracker>(ProjectionLifecycle.Inline);
         m.Projections.Add<ConfigAssignmentProjection>(ProjectionLifecycle.Inline);
         m.Projections.Add<ConfigNodeValueProjection>(ProjectionLifecycle.Inline);
         m.Projections.Add<AssetNodeValueProjection>(ProjectionLifecycle.Inline);
