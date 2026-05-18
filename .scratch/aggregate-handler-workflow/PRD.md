@@ -1,7 +1,7 @@
 # Aggregate Handler Workflow + Decider Adoption
 
-Status: **PARTIALLY SHIPPED — transitional shape only** (was design-locked)
-Shipped commits: 2eaef61 (Owner pilot), 586b18a (Brand pilot)
+Status: **PARTIALLY SHIPPED — `[WriteAggregate]` adoptions starting**
+Shipped commits: 2eaef61 (Owner pilot), 586b18a (Brand pilot), 462e744 (ArchiveConfigDraft `[WriteAggregate]`), 23a164f (UpdateConfigDraft `[WriteAggregate]`), fb0b333 (Prereq 5 — conjoined tenancy), a822a3a (ConfigAssignment SingleStream).
 
 ## Shipped — `[WriteAggregate]` adoptions
 

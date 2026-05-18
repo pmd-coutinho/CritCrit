@@ -1,5 +1,27 @@
 # Projection Cleanup: SingleStream Where Possible
 
+Status: **EXPANDED** — ConfigSchema family + ConfigAssignment now SingleStream
+Shipped commits: fec84b1 (ConfigSchema pilot), a822a3a (ConfigAssignment)
+
+## Version-field naming convention (discovered a822a3a)
+
+Marten SingleStreamProjection treats any document property named `Version` as stream-version metadata and overwrites application-level increments at projection time. Tests on ConfigSchema/Draft didn't catch it because no test compared `doc.Version` for optimistic concurrency; ConfigAssignment exposed the issue via `archived_then_restored_assignment_cycle_works`.
+
+**Convention going forward**: name the application-level optimistic-concurrency counter `DocVersion` on any document that is the snapshot target of a `SingleStreamProjection<T>`. Map back to `Version` on the response DTO if the API surface needs it. See `ConfigAssignmentReadModel.DocVersion` (a822a3a).
+
+## Next aggregates (deferred)
+
+- **OrgNodeReadModel** — multi-day. Requires:
+  - `EnrichEventsAsync` for parent lookup on Create (cross-stream)
+  - Cascade-to-descendants on Archived/Restored: extract to sibling EventProjection using `Patch`
+  - Handler-level descendant Store mutations (`OrgNodeLifecycleEndpoints.ArchiveOrgNodeEndpoint`) must switch to Patch operations to avoid SingleStreamProjection version clash
+  - `MoveOrgNodeProjection` cascade-to-descendants similar refactor
+- **OrgAccessGrantReadModel / ConfigNodeValueReadModel / AssetNodeValueReadModel** — string composite Ids block SingleStreamProjection (Marten requires Id type matches stream-id type, which is Guid). Doc-Id refactor or accept these stay EventProjection.
+
+Original status preserved below.
+
+---
+
 Status: **PILOT SHIPPED** (was design-locked)
 Shipped commit: fec84b1
 
