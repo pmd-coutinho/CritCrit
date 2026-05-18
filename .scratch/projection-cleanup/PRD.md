@@ -1,10 +1,22 @@
 # Projection Cleanup: SingleStream Where Possible
 
-Status: **NOT STARTED** (was design-locked)
+Status: **PILOT SHIPPED** (was design-locked)
+Shipped commit: fec84b1
 
-## Shipped
+## Shipped — ConfigSchemaProjection pilot
 
-Nothing yet. All projections still `EventProjection` with `LoadAsync → mutate → Store` patterns.
+The 152-LOC `EventProjection` writing three doc types is now four single-purpose projections:
+
+- `ConfigSchemaProjection : SingleStreamProjection<ConfigSchemaReadModel, Guid>` — pure `Apply` per event type, zero async loads.
+- `ConfigSchemaDraftProjection : SingleStreamProjection<ConfigSchemaDraftReadModel, Guid>` — pure `Apply` per event type, zero async loads.
+- `ConfigSchemaVersionProjection : EventProjection` — single `Create` per `ConfigSchemaVersionPublished`; one event → one immutable snapshot doc.
+- `ConfigSchemaDraftPublishedTracker : EventProjection` — the **deliberate narrow cross-stream exception**, documented in code. Uses Marten `Patch` (not `Store`) for the field updates so it does not collide with the SingleStreamProjection's version tracking on the same doc type.
+
+Discovered constraint (now documented): when one doc type is the snapshot target of a `SingleStreamProjection<T>`, any sibling `EventProjection` that mutates the *same* doc must use Marten `Patch` operations rather than `ops.Store(...)`. Otherwise Marten's optimistic-concurrency check fires during the inline projection commit and the transaction fails.
+
+124/124 integration tests green; lifecycle, resolution, and assignment tests all pass against the new shape.
+
+## Still missing
 
 ## Still missing
 
