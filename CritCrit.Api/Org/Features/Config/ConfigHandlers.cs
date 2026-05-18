@@ -313,7 +313,7 @@ public static class ConfigHandlers
             lookup.Assignment.SchemaVersion,
             node.PublicId,
             new ConfigAssignmentSummary(lookup.Assignment.Id, lookup.Assignment.RootOrgNodePublicId, lookup.Assignment.SchemaCode, lookup.Assignment.SchemaVersion),
-            lookup.Assignment.Version,
+            lookup.Assignment.DocVersion,
             values);
     }
 

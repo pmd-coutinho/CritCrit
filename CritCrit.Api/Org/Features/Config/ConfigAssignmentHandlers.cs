@@ -169,8 +169,8 @@ public static class ConfigAssignmentHandlers
             throw new DomainException("Assignment does not belong to this brand tenant.");
         if (doc.Archived)
             throw new DomainException("Assignment is already archived.");
-        if (doc.Version != request.ExpectedVersion)
-            throw new DomainException($"Expected version {request.ExpectedVersion}, found {doc.Version}.", 409);
+        if (doc.DocVersion != request.ExpectedVersion)
+            throw new DomainException($"Expected version {request.ExpectedVersion}, found {doc.DocVersion}.", 409);
 
         var now = TimeProvider.System.GetUtcNow();
         session.Events.Append(doc.Id, new ConfigAssignmentArchived(new ConfigAssignmentId(doc.Id), request.Reason, now));
@@ -223,8 +223,8 @@ public static class ConfigAssignmentHandlers
             throw new DomainException("Assignment does not belong to this brand tenant.");
         if (!doc.Archived)
             throw new DomainException("Assignment is not archived.");
-        if (doc.Version != request.ExpectedVersion)
-            throw new DomainException($"Expected version {request.ExpectedVersion}, found {doc.Version}.", 409);
+        if (doc.DocVersion != request.ExpectedVersion)
+            throw new DomainException($"Expected version {request.ExpectedVersion}, found {doc.DocVersion}.", 409);
 
         var now = TimeProvider.System.GetUtcNow();
         session.Events.Append(doc.Id, new ConfigAssignmentRestored(new ConfigAssignmentId(doc.Id), request.Reason, now));
@@ -321,8 +321,8 @@ public static class ConfigAssignmentHandlers
         var (assignment, _, target) = await LoadAssignmentAndVersionsAsync(
             store, tenant, assignmentId, request.TargetSchemaVersion, ct);
 
-        if (assignment.Version != request.ExpectedVersion)
-            throw new DomainException($"Expected version {request.ExpectedVersion}, found {assignment.Version}.", 409);
+        if (assignment.DocVersion != request.ExpectedVersion)
+            throw new DomainException($"Expected version {request.ExpectedVersion}, found {assignment.DocVersion}.", 409);
         if (assignment.Archived)
             throw new DomainException("Cannot upgrade an archived assignment.");
 
@@ -401,5 +401,5 @@ public static class ConfigAssignmentHandlers
     }
 
     internal static ConfigAssignmentResponse ToResponse(ConfigAssignmentReadModel a) =>
-        new(a.Id, a.RootOrgNodePublicId, a.SchemaCode, a.SchemaVersion, a.Archived, a.Version, a.AssignedAt, a.ArchivedAt);
+        new(a.Id, a.RootOrgNodePublicId, a.SchemaCode, a.SchemaVersion, a.Archived, a.DocVersion, a.AssignedAt, a.ArchivedAt);
 }

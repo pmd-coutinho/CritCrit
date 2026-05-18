@@ -59,7 +59,12 @@ public sealed class ConfigAssignmentReadModel
     public string SchemaCode { get; set; } = "";
     public int SchemaVersion { get; set; }
     public bool Archived { get; set; }
-    public long Version { get; set; }
+    /// <summary>
+    /// Doc revision counter — bumped by every projected event. Distinct from
+    /// SchemaVersion (assigned schema version) and from Marten's internal
+    /// mt_version metadata. Used for optimistic concurrency at the API layer.
+    /// </summary>
+    public long DocVersion { get; set; }
     public DateTimeOffset AssignedAt { get; set; }
     public DateTimeOffset? ArchivedAt { get; set; }
     public DateTimeOffset UpdatedAt { get; set; }
