@@ -151,26 +151,23 @@ public static class DowngradeOwnerEndpoint
 
     public static async Task<OwnerTransitionContext> LoadAsync(
         DowngradeOwnerRequest request,
-        string subjectId,
+        SubjectId subjectId,
         IDocumentStore store,
         BrandTenantContext tenant,
         CancellationToken ct)
     {
-        if (!OrgPublicId.TryParseSubject(subjectId, out var parsedSubjectId))
-            throw new DomainException("Invalid subject ID.");
-
         await using var query = store.QuerySession(tenant.TenantId.Value.ToString());
-        var grantId = OrgAccessGrantReadModel.BuildId(tenant.TenantId, tenant.TenantId, parsedSubjectId);
+        var grantId = OrgAccessGrantReadModel.BuildId(tenant.TenantId, tenant.TenantId, subjectId);
         var grant = await query.LoadAsync<OrgAccessGrantReadModel>(grantId, ct);
-        var subject = await query.LoadAsync<SubjectReadModel>(parsedSubjectId.Value, ct);
-        return new OwnerTransitionContext(parsedSubjectId, grant, subject);
+        var subject = await query.LoadAsync<SubjectReadModel>(subjectId.Value, ct);
+        return new OwnerTransitionContext(subjectId, grant, subject);
     }
 
     [WolverinePost("/api/brands/{brandId}/owners/{subjectId}/downgrade")]
     public static async Task<GrantResponse> Handle(
         DowngradeOwnerRequest request,
         string brandId,
-        string subjectId,
+        SubjectId subjectId,
         OwnerTransitionContext loaded,
         IDocumentStore store,
         OrgAuthorizationService authorization,
@@ -211,7 +208,7 @@ public static class DowngradeOwnerEndpoint
         var updated = await session.LoadAsync<OrgAccessGrantReadModel>(loaded.Grant.Id, ct)
             ?? throw new InvalidOperationException("Projection failed to update OrgAccessGrantReadModel.");
 
-        return new GrantResponse(updated.Id, brandId, subjectId, updated.Role, updated.ExpiresAt);
+        return new GrantResponse(updated.Id, brandId, OrgPublicId.FormatSubject(subjectId), updated.Role, updated.ExpiresAt);
     }
 }
 
@@ -228,26 +225,23 @@ public static class RevokeOwnerEndpoint
 
     public static async Task<OwnerTransitionContext> LoadAsync(
         RevokeOwnerRequest request,
-        string subjectId,
+        SubjectId subjectId,
         IDocumentStore store,
         BrandTenantContext tenant,
         CancellationToken ct)
     {
-        if (!OrgPublicId.TryParseSubject(subjectId, out var parsedSubjectId))
-            throw new DomainException("Invalid subject ID.");
-
         await using var query = store.QuerySession(tenant.TenantId.Value.ToString());
-        var grantId = OrgAccessGrantReadModel.BuildId(tenant.TenantId, tenant.TenantId, parsedSubjectId);
+        var grantId = OrgAccessGrantReadModel.BuildId(tenant.TenantId, tenant.TenantId, subjectId);
         var grant = await query.LoadAsync<OrgAccessGrantReadModel>(grantId, ct);
-        var subject = await query.LoadAsync<SubjectReadModel>(parsedSubjectId.Value, ct);
-        return new OwnerTransitionContext(parsedSubjectId, grant, subject);
+        var subject = await query.LoadAsync<SubjectReadModel>(subjectId.Value, ct);
+        return new OwnerTransitionContext(subjectId, grant, subject);
     }
 
     [WolverinePost("/api/brands/{brandId}/owners/{subjectId}/revoke")]
     public static async Task<IResult> Handle(
         RevokeOwnerRequest request,
         string brandId,
-        string subjectId,
+        SubjectId subjectId,
         OwnerTransitionContext loaded,
         IDocumentStore store,
         OrgAuthorizationService authorization,

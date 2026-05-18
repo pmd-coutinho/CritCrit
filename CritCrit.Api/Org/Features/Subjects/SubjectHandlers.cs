@@ -101,7 +101,7 @@ public static class SubjectHandlers
     [WolverinePost("/api/platform/subjects/{subjectId}/deactivate")]
     [EmptyResponse]
     public static async Task DeactivateSubject(
-        string subjectId,
+        SubjectId subjectId,
         DeactivateSubjectRequest request,
         IDocumentStore store,
         OrgAuthorizationService authorization,
@@ -111,8 +111,7 @@ public static class SubjectHandlers
     {
         authorization.EnforceSuperAdmin(actor);
 
-        if (!OrgPublicId.TryParseSubject(subjectId, out var parsedSubjectId))
-            throw new DomainException("Invalid subject ID.");
+        var parsedSubjectId = subjectId;
 
         await using var platformSession = SessionFactory.PlatformSession(store);
         SessionMetadata.StampActor(platformSession, actor);
@@ -175,7 +174,7 @@ public static class SubjectHandlers
     [WolverinePost("/api/platform/subjects/{subjectId}/reactivate")]
     [EmptyResponse]
     public static async Task ReactivateSubject(
-        string subjectId,
+        SubjectId subjectId,
         ReactivateSubjectRequest request,
         IDocumentStore store,
         OrgAuthorizationService authorization,
@@ -185,8 +184,7 @@ public static class SubjectHandlers
     {
         authorization.EnforceSuperAdmin(actor);
 
-        if (!OrgPublicId.TryParseSubject(subjectId, out var parsedSubjectId))
-            throw new DomainException("Invalid subject ID.");
+        var parsedSubjectId = subjectId;
 
         await using var session = SessionFactory.PlatformSession(store);
         SessionMetadata.StampActor(session, actor);
@@ -220,7 +218,7 @@ public static class SubjectHandlers
     [WolverinePost("/api/platform/subjects/{subjectId}/relink")]
     [EmptyResponse]
     public static async Task RelinkSubject(
-        string subjectId,
+        SubjectId subjectId,
         RelinkSubjectIdentityRequest request,
         IDocumentStore store,
         OrgAuthorizationService authorization,
@@ -230,8 +228,7 @@ public static class SubjectHandlers
     {
         authorization.EnforceSuperAdmin(actor);
 
-        if (!OrgPublicId.TryParseSubject(subjectId, out var parsedSubjectId))
-            throw new DomainException("Invalid subject ID.");
+        var parsedSubjectId = subjectId;
 
         if (string.IsNullOrWhiteSpace(request.NewExternalId))
             throw new DomainException("New external ID is required.");

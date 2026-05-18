@@ -195,7 +195,7 @@ public static class OrgNodeHandlers
 
     [WolverinePost("/api/brands/{brandId}/org-nodes/{nodeId}/archive")]
     public static async Task<OrgNodeResponse> ArchiveOrgNode(
-        string nodeId,
+        OrgNodeId nodeId,
         ArchiveOrgNodeRequest request,
         string brandId,
         IDocumentStore store,
@@ -208,9 +208,7 @@ public static class OrgNodeHandlers
         await using var session = SessionFactory.TenantSession(store, tenant);
         SessionMetadata.StampActor(session, actor);
 
-        if (!OrgPublicId.TryParseOrgNode(nodeId, out var id, out _))
-            throw new DomainException("Invalid org node ID.");
-
+        var id = nodeId;
         var target = await OrgValidation.LoadNodeAsync(session, id, ct);
         if (target.TenantId != tenant.TenantId.Value)
             throw new DomainException("Org node does not belong to the requested brand tenant.");
@@ -360,7 +358,7 @@ public static class OrgNodeHandlers
     [WolverinePost("/api/brands/{brandId}/org-nodes/{nodeId}/hard-delete")]
     [EmptyResponse]
     public static async Task HardDeleteOrgNode(
-        string nodeId,
+        OrgNodeId nodeId,
         HardDeleteOrgNodeRequest request,
         string brandId,
         IDocumentStore store,
@@ -373,9 +371,7 @@ public static class OrgNodeHandlers
         await using var session = SessionFactory.TenantSession(store, tenant);
         SessionMetadata.StampActor(session, actor);
 
-        if (!OrgPublicId.TryParseOrgNode(nodeId, out var id, out _))
-            throw new DomainException("Invalid org node ID.");
-
+        var id = nodeId;
         var target = await OrgValidation.LoadNodeAsync(session, id, ct);
         if (target.TenantId != tenant.TenantId.Value)
             throw new DomainException("Org node does not belong to the requested brand tenant.");
@@ -453,7 +449,7 @@ public static class OrgNodeHandlers
 
     [WolverinePost("/api/brands/{brandId}/org-nodes/{nodeId}/move")]
     public static async Task<OrgNodeResponse> MoveOrgNode(
-        string nodeId,
+        OrgNodeId nodeId,
         MoveOrgNodeRequest request,
         string brandId,
         IDocumentStore store,
@@ -466,8 +462,7 @@ public static class OrgNodeHandlers
         await using var session = SessionFactory.TenantSession(store, tenant);
         SessionMetadata.StampActor(session, actor);
 
-        if (!OrgPublicId.TryParseOrgNode(nodeId, out var id, out _))
-            throw new DomainException("Invalid org node ID.");
+        var id = nodeId;
         if (!OrgPublicId.TryParseOrgNode(request.NewParentId, out var newParentId, out _))
             throw new DomainException("Invalid new parent ID.");
 
