@@ -175,6 +175,23 @@ Without this split, `[AggregateHandler]` is not viable for that aggregate.
 
 Aggregates where step 3 is straightforward (no cross-doc updates per event): suitable migration targets first. Aggregates where the EventProjection genuinely needs to write multiple doc types per event: a longer-running design problem (the auxiliary docs need to be maintained from sibling projections or from cascading messages).
 
+### Prereq 6 — Raw-Guid route param OR Marten strong-typed-id registration
+
+Discovered during `[WriteAggregate]` adoption attempt on Subject endpoints (commits reverted, never landed).
+
+Wolverine's `[WriteAggregate("argName")]` extracts the stream id from the route value `argName` by direct Guid parsing. It does **not** auto-unwrap strong-typed identifiers (`SubjectId`, `InvitationId`, etc.) — the route value must already be Guid-parseable as a string.
+
+CritCrit routes use public-id strings (`subj_<guid>`, `inv_<guid>`, etc.). Wolverine's TryParse on `Guid` fails on these, so the endpoint resolves to 404 at runtime even though the aggregate exists.
+
+Workable today: routes that take a raw `Guid` directly (e.g. ConfigSchemaDraft endpoints' `{draftId}`). `ArchiveConfigDraftEndpoint` is the first proof.
+
+Blocked until lifted (one of these):
+- **Refactor doc identity to use strong-typed IDs** (Marten 8 supports `Schema.For<T>().Identity(x => x.Id)` with strong-typed Id types). Heavier refactor — every doc reference and every projection signature changes.
+- **Dual routes** — public-id route + raw-Guid route per command endpoint, with the raw-Guid route used by `[WriteAggregate]`. Doubles the API surface; bad ergonomics.
+- **Custom Wolverine parameter strategy** that runs `SubjectId.TryParse(routeValue, out var id)` then exposes `id.Value` to `[WriteAggregate]`. Deep Wolverine internals work.
+
+Until lifted, `[WriteAggregate]` adoption is constrained to aggregates whose endpoint routes carry the raw `Guid` directly. ConfigSchemaDraft endpoints qualify. Subject, Invitation, ConfigSchema, Owner, Brand, OrgNode all do not (they all use public-id strings in routes).
+
 ### Prereq 4 — Per-endpoint class shape
 
 Discovered while attempting validator removal: **Wolverine.Http convention methods (`Validate`, `LoadAsync`, `Before`, ...) are resolved per-class, not per-endpoint.** A class can declare at most one `Validate(TRequest)` method; Wolverine wires that single method into every endpoint on the class regardless of the endpoint's actual request type. Multi-endpoint classes with multiple request types produce JasperFx codegen errors like `UnResolvableVariableException: was unable to resolve a variable of type CreatePlainOrgNodeRequest as part of the method POST_api_brands_brandId_stores`.
