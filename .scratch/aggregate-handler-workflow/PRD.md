@@ -21,7 +21,8 @@ The decide-fn-purity centerpiece (no `IDocumentStore`, no inline `Events.Append/
 1. ✅ Deterministic stream IDs — shipped (see `.scratch/deterministic-stream-ids/`)
 2. ✅ `IParsable<T>` on strong-typed IDs — shipped
 3. ✅ Per-endpoint class shape — shipped
-4. ❌ **`SingleStreamProjection<T>` per aggregate** — the last gate; tracked in `.scratch/projection-cleanup/`
+4. 🟡 **`SingleStreamProjection<T>` per aggregate** — done for single-tenanted aggregates (ConfigSchema family, Subject, Invitation); blocked for multi-tenanted aggregates by prereq 5
+5. ❌ **Conjoined event-store tenancy (`m.Events.TenancyStyle = TenancyStyle.Conjoined`)** — required to bridge SingleStreamProjection with multi-tenanted doc types. Schema migration + backfill required. Multi-tenanted aggregates: OrgNode, OrgAccessGrant, ConfigAssignment, ConfigNodeValue, AssetNodeValue.
 
 Pending (after prereq 4):
 - `[AggregateHandler]` + `[Aggregate]` / `[WriteAggregate]` on Owner / Brand / Access / Subject endpoints.
