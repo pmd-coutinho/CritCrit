@@ -383,46 +383,7 @@ public static class ConfigSchemaHandlers
         return Results.Ok(ToResponse(refreshed!));
     }
 
-    [WolverinePost("/api/platform/config-schemas/{schemaCode}/drafts/{draftId}/archive")]
-    [EmptyResponse]
-    public static async Task ArchiveDraft(
-        string schemaCode,
-        Guid draftId,
-        ArchiveConfigDraftRequest request,
-        IDocumentStore store,
-        OrgAuthorizationService authorization,
-        IAuditWriter audit,
-        ActorContext actor,
-        CancellationToken ct)
-    {
-        authorization.EnforceSuperAdmin(actor);
-
-        await using var session = SessionFactory.PlatformSession(store);
-        SessionMetadata.StampActor(session, actor);
-
-        var draft = await session.LoadAsync<ConfigSchemaDraftReadModel>(draftId, ct)
-            ?? throw new DomainException("Draft not found.", 404);
-        if (draft.SchemaCode != ConfigCode.Normalize(schemaCode))
-            throw new DomainException("Draft does not belong to the requested schema.");
-        if (draft.Archived)
-            throw new DomainException("Draft is already archived.");
-        if (draft.Published)
-            throw new DomainException("Cannot archive a published draft.");
-        if (draft.Version != request.ExpectedVersion)
-            throw new DomainException($"Expected version {request.ExpectedVersion}, found {draft.Version}.", 409);
-
-        var now = TimeProvider.System.GetUtcNow();
-        session.Events.Append(draft.Id, new ConfigSchemaDraftArchived(new ConfigDraftId(draft.Id), request.Reason, now));
-        audit.Record(session, new AuditRecord(
-            ConfigAuditActions.DraftArchived,
-            AuditCategories.Config,
-            AuditSeverities.Warn,
-            Actor: actor,
-            Reason: request.Reason,
-            Details: new { draft.SchemaCode, DraftId = draft.Id }));
-
-        await session.SaveChangesAsync(ct);
-    }
+    // ArchiveDraft moved to ArchiveConfigDraftEndpoint with [WriteAggregate].
 
     [WolverinePost("/api/platform/config-schemas/{schemaCode}/drafts/{draftId}/publish")]
     public static async Task<IResult> PublishDraft(
