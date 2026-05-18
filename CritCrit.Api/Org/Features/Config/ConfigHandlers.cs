@@ -19,15 +19,14 @@ public static class ConfigHandlers
     [WolverineGet("/api/brands/{brandId}/org-nodes/{nodeId}/config")]
     public static async Task<IReadOnlyList<NodeConfigSchemaSummary>> ListEffectiveSchemas(
         string brandId,
-        string nodeId,
+        OrgNodeId nodeId,
         IDocumentStore store,
         OrgAuthorizationService authorization,
         BrandTenantContext tenant,
         ActorContext actor,
         CancellationToken ct)
     {
-        if (!OrgPublicId.TryParseOrgNode(nodeId, out var orgNodeId, out _))
-            throw new DomainException("Invalid org node ID.");
+        var orgNodeId = nodeId;
 
         await using var tenantSession = SessionFactory.TenantSession(store, tenant);
         var node = await OrgValidation.LoadNodeAsync(tenantSession, orgNodeId, ct);
@@ -86,7 +85,7 @@ public static class ConfigHandlers
     [WolverineGet("/api/brands/{brandId}/org-nodes/{nodeId}/config/{path}")]
     public static async Task<IResult> LookupConfig(
         string brandId,
-        string nodeId,
+        OrgNodeId nodeId,
         string path,
         bool? includeMetadata,
         IDocumentStore store,
@@ -96,8 +95,7 @@ public static class ConfigHandlers
         ActorContext actor,
         CancellationToken ct)
     {
-        if (!OrgPublicId.TryParseOrgNode(nodeId, out var orgNodeId, out _))
-            throw new DomainException("Invalid org node ID.");
+        var orgNodeId = nodeId;
 
         var (schemaCode, keyCode) = SplitPath(path);
 
@@ -140,7 +138,7 @@ public static class ConfigHandlers
     [WolverinePatch("/api/brands/{brandId}/org-nodes/{nodeId}/config/{schemaCode}")]
     public static async Task<IResult> PatchValues(
         string brandId,
-        string nodeId,
+        OrgNodeId nodeId,
         string schemaCode,
         PatchConfigValuesRequest request,
         IDocumentStore store,
@@ -154,8 +152,7 @@ public static class ConfigHandlers
         ActorContext actor,
         CancellationToken ct)
     {
-        if (!OrgPublicId.TryParseOrgNode(nodeId, out var orgNodeId, out _))
-            throw new DomainException("Invalid org node ID.");
+        var orgNodeId = nodeId;
 
         await using var tenantSession = SessionFactory.TenantSession(store, tenant);
         SessionMetadata.StampActor(tenantSession, actor);

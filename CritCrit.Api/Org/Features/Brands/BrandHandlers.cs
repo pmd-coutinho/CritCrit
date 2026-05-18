@@ -57,20 +57,15 @@ public static class BrandHandlers
 
     [WolverineGet("/api/brands/{brandId}/org-nodes/{nodeId}")]
     public static async Task<IResult> GetNode(
-        string nodeId,
+        OrgNodeId nodeId,
         IDocumentStore store,
         BrandTenantContext tenant,
         CancellationToken ct)
     {
         await using var session = SessionFactory.TenantSession(store, tenant);
-
-        if (!OrgPublicId.TryParseOrgNode(nodeId, out var id, out _))
-            return Results.NotFound();
-
-        var node = await session.LoadAsync<OrgNodeReadModel>(id.Value, ct);
+        var node = await session.LoadAsync<OrgNodeReadModel>(nodeId.Value, ct);
         if (node is null || node.TenantId != tenant.TenantId.Value || node.HardDeleted)
             return Results.NotFound();
-
         return Results.Ok(ToResponse(node));
     }
 

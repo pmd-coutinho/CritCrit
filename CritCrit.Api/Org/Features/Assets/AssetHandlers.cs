@@ -12,7 +12,7 @@ public static class AssetHandlers
     [WolverineGet("/api/brands/{brandId}/org-nodes/{nodeId}/assets")]
     public static async Task<IReadOnlyList<AssetLookupResponse>> ListAssets(
         string brandId,
-        string nodeId,
+        OrgNodeId nodeId,
         IDocumentStore store,
         OrgAuthorizationService authorization,
         AssetResolutionService resolver,
@@ -22,13 +22,13 @@ public static class AssetHandlers
     {
         var node = await LoadAuthorizedNode(nodeId, store, authorization, tenant, actor, OrgRole.Viewer, ct);
         var resolved = await resolver.ResolveAllAsync(node, ct);
-        return resolved.Select(r => ToResponse(brandId, nodeId, r)).ToArray();
+        return resolved.Select(r => ToResponse(brandId, node.PublicId,r)).ToArray();
     }
 
     [WolverineGet("/api/brands/{brandId}/org-nodes/{nodeId}/assets/{key}")]
     public static async Task<AssetLookupResponse> GetAsset(
         string brandId,
-        string nodeId,
+        OrgNodeId nodeId,
         string key,
         IDocumentStore store,
         OrgAuthorizationService authorization,
@@ -40,12 +40,12 @@ public static class AssetHandlers
         AssetKey.EnsureValid(key);
         var node = await LoadAuthorizedNode(nodeId, store, authorization, tenant, actor, OrgRole.Viewer, ct);
         var resolved = await resolver.ResolveOneAsync(node, key, ct);
-        return ToResponse(brandId, nodeId, resolved);
+        return ToResponse(brandId, node.PublicId,resolved);
     }
 
     [WolverineGet("/api/brands/{brandId}/org-nodes/{nodeId}/assets/{key}/content")]
     public static async Task<IResult> GetAssetContent(
-        string nodeId,
+        OrgNodeId nodeId,
         string key,
         IDocumentStore store,
         OrgAuthorizationService authorization,
@@ -70,7 +70,7 @@ public static class AssetHandlers
     [RequestFormLimits(MultipartBodyLengthLimit = AssetValidation.VideoMaxBytes)]
     public static async Task<IResult> UploadAsset(
         string key,
-        string nodeId,
+        OrgNodeId nodeId,
         [FromForm] long expectedVersion,
         [FromForm] string? reason,
         IFormFile file,
@@ -124,7 +124,7 @@ public static class AssetHandlers
     [EmptyResponse]
     public static async Task InheritAsset(
         string key,
-        string nodeId,
+        OrgNodeId nodeId,
         PatchAssetRequest request,
         IDocumentStore store,
         OrgAuthorizationService authorization,
@@ -151,7 +151,7 @@ public static class AssetHandlers
     [EmptyResponse]
     public static async Task UnsetAsset(
         string key,
-        string nodeId,
+        OrgNodeId nodeId,
         PatchAssetRequest request,
         IDocumentStore store,
         OrgAuthorizationService authorization,
@@ -175,7 +175,7 @@ public static class AssetHandlers
     }
 
     private static async Task<OrgNodeReadModel> LoadAuthorizedNode(
-        string nodeId,
+        OrgNodeId nodeId,
         IDocumentStore store,
         OrgAuthorizationService authorization,
         BrandTenantContext tenant,
@@ -183,8 +183,7 @@ public static class AssetHandlers
         OrgRole required,
         CancellationToken ct)
     {
-        if (!OrgPublicId.TryParseOrgNode(nodeId, out var orgNodeId, out _))
-            throw new DomainException("Invalid org node ID.");
+        var orgNodeId = nodeId;
 
         await using var session = SessionFactory.TenantSession(store, tenant);
         var node = await OrgValidation.LoadNodeAsync(session, orgNodeId, ct);
@@ -260,7 +259,7 @@ public static class AssetHandlers
 
     private static AssetLookupResponse ToResponse(
         string brandId,
-        string nodeId,
+        string nodePublicId,
         AssetResolutionService.ResolvedAsset asset)
     {
         var state = asset.Source switch
@@ -273,7 +272,7 @@ public static class AssetHandlers
 
         var contentUrl = asset.File is null
             ? null
-            : $"/api/brands/{Uri.EscapeDataString(brandId)}/org-nodes/{Uri.EscapeDataString(nodeId)}/assets/{Uri.EscapeDataString(asset.Key)}/content";
+            : $"/api/brands/{Uri.EscapeDataString(brandId)}/org-nodes/{Uri.EscapeDataString(nodePublicId)}/assets/{Uri.EscapeDataString(asset.Key)}/content";
 
         return new AssetLookupResponse(
             asset.Key,

@@ -14,7 +14,7 @@ public static class ConfigAssignmentHandlers
     [WolverineGet("/api/brands/{brandId}/org-nodes/{nodeId}/config-assignments")]
     public static async Task<IReadOnlyList<ConfigAssignmentResponse>> ListAssignments(
         string brandId,
-        string nodeId,
+        OrgNodeId nodeId,
         bool? includeArchived,
         IDocumentStore store,
         OrgAuthorizationService authorization,
@@ -22,8 +22,7 @@ public static class ConfigAssignmentHandlers
         ActorContext actor,
         CancellationToken ct)
     {
-        if (!OrgPublicId.TryParseOrgNode(nodeId, out var orgNodeId, out _))
-            throw new DomainException("Invalid org node ID.");
+        var orgNodeId = nodeId;
 
         await using var session = SessionFactory.TenantSession(store, tenant);
         var node = await OrgValidation.LoadNodeAsync(session, orgNodeId, ct);
@@ -46,7 +45,7 @@ public static class ConfigAssignmentHandlers
     [WolverinePost("/api/brands/{brandId}/org-nodes/{nodeId}/config-assignments")]
     public static async Task<IResult> CreateAssignment(
         string brandId,
-        string nodeId,
+        OrgNodeId nodeId,
         AssignConfigSchemaRequest request,
         IDocumentStore store,
         OrgAuthorizationService authorization,
@@ -59,8 +58,7 @@ public static class ConfigAssignmentHandlers
         authorization.EnforceSuperAdmin(actor);
         ConfigCode.EnsureValidSchemaCode(request.SchemaCode);
 
-        if (!OrgPublicId.TryParseOrgNode(nodeId, out var orgNodeId, out _))
-            throw new DomainException("Invalid org node ID.");
+        var orgNodeId = nodeId;
 
         await using var tenantSession = SessionFactory.TenantSession(store, tenant);
         SessionMetadata.StampActor(tenantSession, actor);
@@ -149,7 +147,7 @@ public static class ConfigAssignmentHandlers
     [EmptyResponse]
     public static async Task ArchiveAssignment(
         string brandId,
-        string nodeId,
+        OrgNodeId nodeId,
         Guid assignmentId,
         ArchiveConfigAssignmentRequest request,
         IDocumentStore store,
@@ -203,7 +201,7 @@ public static class ConfigAssignmentHandlers
     [EmptyResponse]
     public static async Task RestoreAssignment(
         string brandId,
-        string nodeId,
+        OrgNodeId nodeId,
         Guid assignmentId,
         RestoreConfigAssignmentRequest request,
         IDocumentStore store,
@@ -256,7 +254,7 @@ public static class ConfigAssignmentHandlers
     [WolverinePost("/api/brands/{brandId}/org-nodes/{nodeId}/config-assignments/{assignmentId}/upgrade-preview")]
     public static async Task<ConfigAssignmentUpgradePreviewResponse> UpgradePreview(
         string brandId,
-        string nodeId,
+        OrgNodeId nodeId,
         Guid assignmentId,
         UpgradeConfigAssignmentRequest request,
         IDocumentStore store,
@@ -307,7 +305,7 @@ public static class ConfigAssignmentHandlers
     [WolverinePost("/api/brands/{brandId}/org-nodes/{nodeId}/config-assignments/{assignmentId}/upgrade")]
     public static async Task<ConfigAssignmentResponse> UpgradeAssignment(
         string brandId,
-        string nodeId,
+        OrgNodeId nodeId,
         Guid assignmentId,
         UpgradeConfigAssignmentRequest request,
         IDocumentStore store,
