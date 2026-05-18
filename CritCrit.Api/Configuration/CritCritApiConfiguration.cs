@@ -22,9 +22,7 @@ using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.OpenApi;
 using Scalar.AspNetCore;
 using Wolverine;
-using Wolverine.FluentValidation;
 using Wolverine.Http;
-using Wolverine.Http.FluentValidation;
 using Wolverine.Http.Marten;
 using Wolverine.Marten;
 using Wolverine.RabbitMQ;
@@ -290,8 +288,6 @@ public static class CritCritApiConfiguration
             opts.Metrics.Mode = WolverineMetricsMode.SystemDiagnosticsMeter;
             opts.Tracking.HandlerExecutionDiagnosticsEnabled = true;
             opts.Tracking.OutboxDiagnosticsEnabled = true;
-            opts.UseFluentValidation();
-            opts.UseFluentValidationProblemDetail();
         });
 
         return services;
@@ -474,7 +470,6 @@ public static class CritCritApiConfiguration
     {
         app.MapWolverineEndpoints(c =>
         {
-            c.UseFluentValidationProblemDetailMiddleware();
             c.ServiceProviderSource = ServiceProviderSource.FromHttpContextRequestServices;
 
             c.SourceServiceFromHttpContext<ActorContext>();

@@ -55,48 +55,8 @@ public static class SubjectHandlers
             x.OnboardedAt)).ToArray();
     }
 
-    [WolverinePost("/api/platform/subjects")]
-    public static async Task<IResult> CreateSubject(
-        CreateSubjectRequest request,
-        IDocumentStore store,
-        OrgAuthorizationService authorization,
-        IAuditWriter audit,
-        ActorContext actor,
-        CancellationToken ct)
-    {
-        authorization.EnforceSuperAdmin(actor);
-
-        await using var session = SessionFactory.PlatformSession(store);
-        SessionMetadata.StampActor(session, actor);
-        var id = SubjectId.New();
-
-        session.Events.StartStream<SubjectReadModel>(id.Value,
-            new SubjectCreated(id, SubjectKind.User, request.Email.Trim(), request.DisplayName?.Trim()));
-        session.Events.Append(id.Value,
-            new ExternalIdentityLinked(id, request.Provider, request.ProviderTenant, request.ExternalId));
-        audit.Record(session, OrgAudit.Record(
-            OrgAuditActions.SubjectCreated,
-            AuditCategories.Subject,
-            AuditSeverities.Info,
-            actor,
-            null,
-            null,
-            details: new
-            {
-                SubjectId = OrgPublicId.FormatSubject(id),
-                EmailMasked = AuditIdentity.MaskEmail(request.Email),
-                request.Provider,
-                request.ProviderTenant
-            },
-            subjectId: id.Value));
-
-        await session.SaveChangesAsync(ct);
-        var subject = await session.LoadAsync<SubjectReadModel>(id.Value, ct)
-            ?? throw new InvalidOperationException("Projection failed to create SubjectReadModel.");
-        var publicId = OrgPublicId.FormatSubject(id);
-        return Results.Created($"/api/platform/subjects/{publicId}",
-            new SubjectResponse(subject.PublicId, subject.Email, subject.DisplayName));
-    }
+    // CreateSubject moved to CreateSubjectEndpoint so its Validate convention
+    // method doesn't collide with the lifecycle endpoints' parameter binding.
 
     [WolverinePost("/api/platform/subjects/{subjectId}/deactivate")]
     [EmptyResponse]

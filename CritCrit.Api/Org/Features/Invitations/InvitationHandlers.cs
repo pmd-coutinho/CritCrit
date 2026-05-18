@@ -11,89 +11,8 @@ namespace CritCrit.Api.Org.Features.Invitations;
 
 public static class InvitationHandlers
 {
-    [WolverinePost("/api/brands/{brandId}/invitations")]
-    public static async Task<IResult> CreateInvitation(
-        CreateInvitationRequest request,
-        string brandId,
-        IDocumentStore store,
-        OrgAuthorizationService authorization,
-        IMessageBus bus,
-        IAuditWriter audit,
-        BrandTenantContext tenant,
-        ActorContext actor,
-        CancellationToken ct)
-    {
-        await using var tenantSession = SessionFactory.TenantSession(store, tenant);
-        var target = await LoadAndAuthorizeTargetAsync(tenantSession, authorization, actor, request.OrgNodeId, request.Role, tenant.TenantId.Value, ct);
-
-        var normalizedEmail = request.Email.Trim().ToLowerInvariant();
-
-        await using var platformSession = SessionFactory.PlatformSession(store);
-        SessionMetadata.StampActor(platformSession, actor);
-
-        var existingSubject = await platformSession.Query<SubjectReadModel>()
-            .Where(x => x.EmailNormalized == normalizedEmail)
-            .SingleOrDefaultAsync(ct);
-        if (existingSubject is { Active: false })
-            throw new DomainException("This subject is deactivated. Reactivate them before re-inviting.");
-
-        var activeInvitation = await platformSession.Query<InvitationReadModel>()
-            .Where(x =>
-                x.TenantId == tenant.TenantId.Value &&
-                x.TargetOrgNodeId == target.Id &&
-                x.EmailNormalized == normalizedEmail &&
-                (x.Status == InvitationStatus.Requested ||
-                 x.Status == InvitationStatus.Provisioning ||
-                 x.Status == InvitationStatus.Pending))
-            .OrderByDescending(x => x.CreatedAt)
-            .FirstOrDefaultAsync(ct);
-
-        var invitationId = InvitationId.New();
-        var now = TimeProvider.System.GetUtcNow();
-
-        if (activeInvitation is not null)
-        {
-            platformSession.Events.Append(activeInvitation.Id,
-                new InvitationSuperseded(new InvitationId(activeInvitation.Id), invitationId, now));
-        }
-
-        platformSession.Events.StartStream<InvitationReadModel>(invitationId.Value,
-            new InvitationRequested(
-                invitationId,
-                tenant.TenantId,
-                new OrgNodeId(target.Id),
-                request.OrgNodeId,
-                request.Email.Trim(),
-                request.Role,
-                actor.SubjectId,
-                actor.ExternalId,
-                now));
-
-        audit.Record(platformSession, OrgAudit.Record(
-            OrgAuditActions.InvitationRequested,
-            AuditCategories.Invitation,
-            AuditSeverities.Info,
-            actor,
-            tenant.TenantId.Value,
-            target.Id,
-            details: new
-            {
-                InvitationId = OrgPublicId.FormatInvitation(invitationId),
-                InviteeEmailMasked = AuditIdentity.MaskEmail(request.Email),
-                Role = request.Role.ToString()
-            },
-            targetPublicId: target.PublicId,
-            targetType: target.Type.ToString().ToLowerInvariant(),
-            targetLabel: target.Name));
-
-        await platformSession.SaveChangesAsync(ct);
-        await bus.InvokeAsync(new ProvisionInvitation(invitationId, new MessageAuditContext(SupportId.Current)));
-
-        var created = await platformSession.LoadAsync<InvitationReadModel>(invitationId.Value, ct)
-            ?? throw new InvalidOperationException("Projection failed to create InvitationReadModel.");
-
-        return Results.Accepted($"/api/brands/{brandId}/invitations/{created.PublicId}", ToResponse(created));
-    }
+    // CreateInvitation moved to CreateInvitationEndpoint.
+    // CancelInvitation moved to CancelInvitationEndpoint.
 
     [WolverineGet("/api/brands/{brandId}/invitations/{invitationId}")]
     public static async Task<InvitationResponse> GetInvitation(
@@ -147,46 +66,6 @@ public static class InvitationHandlers
         }
 
         return visible;
-    }
-
-    [WolverinePost("/api/brands/{brandId}/invitations/{invitationId}/cancel")]
-    public static async Task<InvitationResponse> CancelInvitation(
-        string brandId,
-        InvitationId invitationId,
-        CancelInvitationRequest request,
-        IDocumentStore store,
-        OrgAuthorizationService authorization,
-        IAuditWriter audit,
-        ActorContext actor,
-        CancellationToken ct)
-    {
-        await using var platformSession = SessionFactory.PlatformSession(store);
-        SessionMetadata.StampActor(platformSession, actor);
-        var invitation = await LoadInvitationAsync(invitationId, platformSession, ct);
-
-        if (!invitation.IsPendingLike())
-            throw new DomainException("Only pending invitations can be cancelled.");
-
-        await EnsureInvitationManageableAsync(store, authorization, actor, invitation, ct);
-
-        var reason = string.IsNullOrWhiteSpace(request.Reason) ? null : request.Reason.Trim();
-        platformSession.Events.Append(invitation.Id,
-            new InvitationCancelled(new InvitationId(invitation.Id), TimeProvider.System.GetUtcNow(), reason));
-
-        audit.Record(platformSession, OrgAudit.Record(
-            OrgAuditActions.InvitationCancelled,
-            AuditCategories.Invitation,
-            AuditSeverities.Info,
-            actor,
-            invitation.TenantId,
-            invitation.TargetOrgNodeId,
-            reason,
-            OrgAudit.InviteDetails(invitation)));
-
-        await platformSession.SaveChangesAsync(ct);
-        var updated = await platformSession.LoadAsync<InvitationReadModel>(invitation.Id, ct)
-            ?? throw new InvalidOperationException("Invitation projection missing after cancellation.");
-        return ToResponse(updated);
     }
 
     [WolverinePost("/api/brands/{brandId}/invitations/{invitationId}/resend")]
@@ -420,19 +299,19 @@ public static class InvitationHandlers
             invitation.LastSentAt,
             invitation.Failure);
 
-    private static async Task<InvitationReadModel> LoadInvitationAsync(InvitationId invitationId, IDocumentStore store, CancellationToken ct)
+    internal static async Task<InvitationReadModel> LoadInvitationAsync(InvitationId invitationId, IDocumentStore store, CancellationToken ct)
     {
         await using var query = store.QuerySession();
         return await LoadInvitationAsync(invitationId, query, ct);
     }
 
-    private static async Task<InvitationReadModel> LoadInvitationAsync(InvitationId invitationId, IQuerySession session, CancellationToken ct)
+    internal static async Task<InvitationReadModel> LoadInvitationAsync(InvitationId invitationId, IQuerySession session, CancellationToken ct)
     {
         return await session.LoadAsync<InvitationReadModel>(invitationId.Value, ct)
             ?? throw new DomainException("Invitation was not found.", 404);
     }
 
-    private static async Task<OrgNodeReadModel> LoadAndAuthorizeTargetAsync(
+    internal static async Task<OrgNodeReadModel> LoadAndAuthorizeTargetAsync(
         IQuerySession tenantSession,
         OrgAuthorizationService authorization,
         ActorContext actor,
@@ -469,7 +348,7 @@ public static class InvitationHandlers
             throw new DomainException("The invitation is outside your authorization scope.", 403);
     }
 
-    private static Task EnsureInvitationManageableAsync(
+    internal static Task EnsureInvitationManageableAsync(
         IDocumentStore store,
         OrgAuthorizationService authorization,
         ActorContext actor,
