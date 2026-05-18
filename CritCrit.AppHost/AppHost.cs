@@ -20,6 +20,10 @@ var rabbitmq = builder.AddRabbitMQ("rabbitmq")
     .WithDataVolume()
     .WithOtlpExporter();
 
+var storage = builder.AddAzureStorage("storage")
+    .RunAsEmulator(emulator => emulator.WithDataVolume());
+var assets = storage.AddBlobContainer("assets", blobContainerName: "assets");
+
 var mailpit = builder.AddMailPit("mailpit");
 
 const string spaUrl = "http://localhost:5173";
@@ -33,6 +37,8 @@ var api = builder.AddProject<CritCrit_Api>("api")
     .WaitFor(keycloak)
     .WithReference(rabbitmq)
     .WaitFor(rabbitmq)
+    .WithReference(assets)
+    .WaitFor(assets)
     .WithReference(mailpit)
     .WaitFor(mailpit)
     .WithEnvironment("Invitation__IdentityProvider__Keycloak__BaseUrl", "http://localhost:8080")

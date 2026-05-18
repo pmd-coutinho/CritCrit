@@ -11,6 +11,7 @@ public static class AuditCategories
     public const string Subject = "subject";
     public const string Security = "security";
     public const string Config = "config";
+    public const string Asset = "asset";
 }
 
 public static class AuditSeverities

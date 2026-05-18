@@ -1,6 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/vue-query";
 import { computed, type MaybeRefOrGetter, toValue } from "vue";
-import { api } from "./client";
+import { api, authenticatedFetch } from "./client";
 import type {
   ArchiveOrgNodeRequest,
   CreateBrandRequest,
@@ -56,6 +56,8 @@ export const keys = {
   nodeConfig: (brandId: string, nodeId: string) => ["node-config", brandId, nodeId] as const,
   nodeConfigSchema: (brandId: string, nodeId: string, path: string, meta: boolean) =>
     ["node-config-path", brandId, nodeId, path, meta] as const,
+  nodeAssets: (brandId: string, nodeId: string) => ["node-assets", brandId, nodeId] as const,
+  nodeAsset: (brandId: string, nodeId: string, key: string) => ["node-asset", brandId, nodeId, key] as const,
   nodeAssignments: (brandId: string, nodeId: string, includeArchived: boolean) =>
     ["node-assignments", brandId, nodeId, includeArchived] as const,
 };
@@ -608,6 +610,67 @@ export function usePatchNodeConfig(brandId: MaybeRefOrGetter<string>, nodeId: Ma
       qc.invalidateQueries({ queryKey: keys.nodeConfig(toValue(brandId), toValue(nodeId)) });
       qc.invalidateQueries({ queryKey: ["node-config-path", toValue(brandId), toValue(nodeId)] });
     },
+  });
+}
+
+// ─── Assets (per-node) ───
+
+export function useNodeAssets(brandId: MaybeRefOrGetter<string>, nodeId: MaybeRefOrGetter<string>) {
+  return useQuery({
+    queryKey: computed(() => keys.nodeAssets(toValue(brandId), toValue(nodeId))),
+    queryFn: async () => {
+      const res = await api.GET("/api/brands/{brandId}/org-nodes/{nodeId}/assets", {
+        params: { path: { brandId: toValue(brandId), nodeId: toValue(nodeId) } },
+      });
+      return unwrap(res);
+    },
+    enabled: computed(() => !!toValue(brandId) && !!toValue(nodeId)),
+  });
+}
+
+export function useUploadNodeAsset(brandId: MaybeRefOrGetter<string>, nodeId: MaybeRefOrGetter<string>) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ key, expectedVersion, reason, file }: { key: string; expectedVersion: number; reason?: string | null; file: File }) => {
+      const body = new FormData();
+      body.append("expectedVersion", String(expectedVersion));
+      body.append("reason", reason ?? "");
+      body.append("file", file);
+      const res = await authenticatedFetch(
+        `/api/brands/${encodeURIComponent(toValue(brandId))}/org-nodes/${encodeURIComponent(toValue(nodeId))}/assets/${encodeURIComponent(key)}`,
+        { method: "PUT", body },
+      );
+      if (!res.ok) throw new Error(await res.text() || "Asset upload failed");
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: keys.nodeAssets(toValue(brandId), toValue(nodeId)) }),
+  });
+}
+
+export function useUnsetNodeAsset(brandId: MaybeRefOrGetter<string>, nodeId: MaybeRefOrGetter<string>) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ key, expectedVersion, reason }: { key: string; expectedVersion: number; reason?: string | null }) => {
+      const res = await api.POST("/api/brands/{brandId}/org-nodes/{nodeId}/assets/{key}/unset", {
+        params: { path: { brandId: toValue(brandId), nodeId: toValue(nodeId), key } },
+        body: { expectedVersion, reason: reason ?? null },
+      });
+      if (!res.response.ok) throw (res as { error?: unknown }).error ?? new Error("Unset failed");
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: keys.nodeAssets(toValue(brandId), toValue(nodeId)) }),
+  });
+}
+
+export function useInheritNodeAsset(brandId: MaybeRefOrGetter<string>, nodeId: MaybeRefOrGetter<string>) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ key, expectedVersion, reason }: { key: string; expectedVersion: number; reason?: string | null }) => {
+      const res = await api.POST("/api/brands/{brandId}/org-nodes/{nodeId}/assets/{key}/inherit", {
+        params: { path: { brandId: toValue(brandId), nodeId: toValue(nodeId), key } },
+        body: { expectedVersion, reason: reason ?? null },
+      });
+      if (!res.response.ok) throw (res as { error?: unknown }).error ?? new Error("Inherit failed");
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: keys.nodeAssets(toValue(brandId), toValue(nodeId)) }),
   });
 }
 

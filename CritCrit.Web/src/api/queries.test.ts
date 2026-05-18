@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("./client", () => ({
   api: { GET: mocks.GET, POST: mocks.POST },
+  authenticatedFetch: vi.fn(),
 }));
 
 import { keys } from "./queries";
@@ -105,6 +106,18 @@ describe("config query keys", () => {
     expect(keys.nodeAssignments("br_1", "st_1", true)).not.toEqual(
       keys.nodeAssignments("br_1", "st_1", false),
     );
+  });
+});
+
+describe("asset query keys", () => {
+  it("namespaces node assets by brand and node", () => {
+    expect(keys.nodeAssets("br_1", "st_1")).toEqual(["node-assets", "br_1", "st_1"]);
+    expect(keys.nodeAsset("br_1", "st_1", "kiosk.background-video")).toEqual([
+      "node-asset",
+      "br_1",
+      "st_1",
+      "kiosk.background-video",
+    ]);
   });
 });
 

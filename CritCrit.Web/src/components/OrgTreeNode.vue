@@ -20,6 +20,7 @@ const emit = defineEmits<{
   (e: "move", node: OrgTreeNodeResponse): void;
   (e: "hardDelete", node: OrgTreeNodeResponse): void;
   (e: "config", node: OrgTreeNodeResponse): void;
+  (e: "assets", node: OrgTreeNodeResponse): void;
 }>();
 
 const open = ref(true);
@@ -81,6 +82,10 @@ const glyph = (t: OrgNodeType) =>
                 class="cursor-pointer rounded-xs px-2 py-1.5 text-fg hover:bg-surface-hover focus:bg-surface-hover focus:outline-none"
                 @select="emit('config', node)"
               >Config…</DropdownMenuItem>
+              <DropdownMenuItem
+                class="cursor-pointer rounded-xs px-2 py-1.5 text-fg hover:bg-surface-hover focus:bg-surface-hover focus:outline-none"
+                @select="emit('assets', node)"
+              >Assets…</DropdownMenuItem>
               <DropdownMenuSeparator class="my-1 h-px bg-border" />
               <DropdownMenuItem
                 v-if="!node.archived"
@@ -120,6 +125,7 @@ const glyph = (t: OrgNodeType) =>
         @move="emit('move', $event)"
         @hard-delete="emit('hardDelete', $event)"
         @config="emit('config', $event)"
+        @assets="emit('assets', $event)"
       />
     </div>
   </div>

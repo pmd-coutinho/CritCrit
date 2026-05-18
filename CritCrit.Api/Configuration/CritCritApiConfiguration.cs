@@ -1,5 +1,7 @@
 using System.Security.Claims;
 using System.Text.Json;
+using Azure.Storage.Blobs;
+using CritCrit.Api.Org.Features.Assets;
 using CritCrit.Api.Org.Auth;
 using CritCrit.Api.Org.Domain;
 using CritCrit.Api.Org.Identity;
@@ -221,6 +223,12 @@ public static class CritCritApiConfiguration
             .Index(x => x.TenantId)
             .Index(x => x.OrgNodeId)
             .Index(x => x.SchemaCode);
+
+        // ─── Assets service ───
+        m.Schema.For<AssetNodeValueReadModel>()
+            .MultiTenanted()
+            .Index(x => x.TenantId)
+            .Index(x => x.OrgNodeId);
     }
 
     private static void ConfigureEventStore(StoreOptions m)
@@ -261,6 +269,7 @@ public static class CritCritApiConfiguration
         m.Projections.Add<ConfigSchemaProjection>(ProjectionLifecycle.Inline);
         m.Projections.Add<ConfigAssignmentProjection>(ProjectionLifecycle.Inline);
         m.Projections.Add<ConfigNodeValueProjection>(ProjectionLifecycle.Inline);
+        m.Projections.Add<AssetNodeValueProjection>(ProjectionLifecycle.Inline);
     }
 
     private static IServiceCollection AddCritCritMessaging(this IServiceCollection services)
@@ -317,6 +326,18 @@ public static class CritCritApiConfiguration
         services.AddSingleton<IConfigEncryptionService, ConfigEncryptionService>();
         services.AddSingleton<ConfigValidationService>();
         services.AddScoped<ConfigResolutionService>();
+        services.AddSingleton(sp =>
+        {
+            var configuration = sp.GetRequiredService<IConfiguration>();
+            var connectionString = configuration.GetConnectionString("assets")
+                ?? configuration.GetConnectionString("blobs")
+                ?? configuration.GetConnectionString("storage")
+                ?? throw new InvalidOperationException("Asset blob storage connection string is not configured.");
+            var containerName = configuration.GetValue("Assets:ContainerName", "assets");
+            return new BlobContainerClient(connectionString, containerName);
+        });
+        services.AddSingleton<IAssetStorage, BlobAssetStorage>();
+        services.AddScoped<AssetResolutionService>();
         services.Configure<KeycloakProvisioningOptions>(configuration.GetSection(KeycloakProvisioningOptions.SectionName));
 
         if (environment.IsEnvironment("Testing"))

@@ -20,3 +20,10 @@ const authMiddleware: Middleware = {
 
 export const api = createClient<paths>({ baseUrl: import.meta.env.VITE_API_URL });
 api.use(authMiddleware);
+
+export async function authenticatedFetch(input: string, init: RequestInit = {}) {
+  const u = await userManager.getUser();
+  const headers = new Headers(init.headers);
+  if (u && !u.expired) headers.set("Authorization", `Bearer ${u.access_token}`);
+  return fetch(`${import.meta.env.VITE_API_URL}${input}`, { ...init, headers });
+}

@@ -450,6 +450,36 @@ export interface ConfigAssignmentUpgradePreviewResponse {
   publishable: boolean;
 }
 
+// ─── Assets service types ───
+
+export type AssetKind = "Image" | "Video" | "Pdf" | "Markdown";
+
+export interface AssetFileResponse {
+  fileName: string;
+  contentType: string;
+  kind: AssetKind;
+  length: number;
+  sha256: string;
+  uploadedAt: string;
+  uploadedByExternalId: string;
+}
+
+export interface AssetLookupResponse {
+  key: string;
+  group: string;
+  state: "set" | "unset" | "missing";
+  source: "Local" | "Inherited" | "Unset" | "Missing";
+  sourceNodeId: string | null;
+  valueSetVersion: number;
+  file: AssetFileResponse | null;
+  contentUrl: string | null;
+}
+
+export interface PatchAssetRequest {
+  expectedVersion: number;
+  reason?: string | null;
+}
+
 export interface paths {
   "/api/brands": {
     get: {
@@ -767,6 +797,43 @@ export interface paths {
     patch: {
       parameters: { path: { brandId: string; nodeId: string; schemaCode: string } };
       requestBody: { content: { "application/json": PatchConfigValuesRequest } };
+      responses: { 204: { content: never } };
+    };
+  };
+  "/api/brands/{brandId}/org-nodes/{nodeId}/assets": {
+    get: {
+      parameters: { path: { brandId: string; nodeId: string } };
+      responses: { 200: { content: { "application/json": AssetLookupResponse[] } } };
+    };
+  };
+  "/api/brands/{brandId}/org-nodes/{nodeId}/assets/{key}": {
+    get: {
+      parameters: { path: { brandId: string; nodeId: string; key: string } };
+      responses: { 200: { content: { "application/json": AssetLookupResponse } } };
+    };
+    put: {
+      parameters: { path: { brandId: string; nodeId: string; key: string } };
+      requestBody: { content: { "multipart/form-data": unknown } };
+      responses: { 204: { content: never } };
+    };
+  };
+  "/api/brands/{brandId}/org-nodes/{nodeId}/assets/{key}/content": {
+    get: {
+      parameters: { path: { brandId: string; nodeId: string; key: string } };
+      responses: { 200: { content: { "application/octet-stream": Blob } } };
+    };
+  };
+  "/api/brands/{brandId}/org-nodes/{nodeId}/assets/{key}/inherit": {
+    post: {
+      parameters: { path: { brandId: string; nodeId: string; key: string } };
+      requestBody: { content: { "application/json": PatchAssetRequest } };
+      responses: { 204: { content: never } };
+    };
+  };
+  "/api/brands/{brandId}/org-nodes/{nodeId}/assets/{key}/unset": {
+    post: {
+      parameters: { path: { brandId: string; nodeId: string; key: string } };
+      requestBody: { content: { "application/json": PatchAssetRequest } };
       responses: { 204: { content: never } };
     };
   };

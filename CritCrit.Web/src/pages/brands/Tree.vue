@@ -23,6 +23,7 @@ import PageHeader from "@/components/ui/PageHeader.vue";
 import EmptyState from "@/components/ui/EmptyState.vue";
 import OrgTreeNode from "@/components/OrgTreeNode.vue";
 import NodeConfigDrawer from "@/components/NodeConfigDrawer.vue";
+import NodeAssetsDrawer from "@/components/NodeAssetsDrawer.vue";
 
 const route = useRoute();
 const brandId = computed(() => route.params.brandId as string);
@@ -175,6 +176,15 @@ function openConfig(node: OrgTreeNodeResponse) {
   configOpen.value = true;
 }
 
+// ─── Assets drawer ───
+const assetsOpen = ref(false);
+const assetsNode = ref<OrgTreeNodeResponse | null>(null);
+
+function openAssets(node: OrgTreeNodeResponse) {
+  assetsNode.value = node;
+  assetsOpen.value = true;
+}
+
 // ─── Hard-delete ───
 const deleteOpen = ref(false);
 const deleteTarget = ref<OrgTreeNodeResponse | null>(null);
@@ -239,6 +249,7 @@ async function submitHardDelete() {
         @move="openMove"
         @hard-delete="openHardDelete"
         @config="openConfig"
+        @assets="openAssets"
       />
     </div>
 
@@ -343,6 +354,14 @@ async function submitHardDelete() {
       :brand-id="brandId"
       :node="configNode"
       @update:open="configOpen = $event"
+    />
+
+    <!-- Assets drawer -->
+    <NodeAssetsDrawer
+      :open="assetsOpen"
+      :brand-id="brandId"
+      :node="assetsNode"
+      @update:open="assetsOpen = $event"
     />
 
     <!-- Hard-delete dialog -->

@@ -1,4 +1,5 @@
 using Alba;
+using Azure.Storage.Blobs;
 using CritCrit.Api.Org.Identity;
 using CritCrit.Api.Org.Invitations;
 using CritCrit.Test.Outbox;
@@ -45,6 +46,10 @@ public abstract class IntegrationContext : IAsyncLifetime
         provisioning.PasswordSetupCalls.Clear();
 
         Host.Services.GetRequiredService<OutboxProbeStore>().Clear();
+
+        var assets = Host.Services.GetRequiredService<BlobContainerClient>();
+        await assets.DeleteIfExistsAsync();
+        await assets.CreateIfNotExistsAsync();
     }
 
     public Task DisposeAsync() => Task.CompletedTask;
