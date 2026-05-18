@@ -1,0 +1,7 @@
+# 0002 — Adopt the Decider Pattern over legacy AggregateBase / repository
+
+We adopt Marten + Wolverine's **Decider Pattern** (aggregate-handler workflow with pure decide functions) as the model for all event-sourced command handlers. We do not introduce repository-style aggregates with stateful `AggregateBase` superclasses, and we do not retain legacy Marten patterns the Marten team itself recommends against.
+
+Decide functions are pure `(aggregate, command) → events[]`: no IO, no session, no logging. Cross-aggregate lookups happen in a sibling static `LoadAsync` method per handler. Wolverine handles `FetchForWriting`, event append, and `SaveChanges`. Audit and side effects are emitted from projections subscribing to the resulting events.
+
+This depends on **deterministic stream IDs** for find-or-create aggregates (Org Access Grant, Config Node Value, Asset Node Value) — Wolverine `[AggregateHandler]` needs a stream id at route-dispatch time. See `.scratch/deterministic-stream-ids/PRD.md` for the prerequisite. Until that lands, handlers carry pure invariants in `*Rules.cs` modules, hoist cross-aggregate reads to sibling `LoadAsync`, and use Wolverine's `Validate` convention for shape rules — the Owner and Brand pilots prove this transitional shape. Audit-as-event-consumer (`AuditLogProjection` deriving `ImmutableAuditEvent` from domain events) is deferred to the same wave because it benefits from event-header propagation that arrives with cross-cutting middleware (`.scratch/cross-cutting-middleware/`).
