@@ -120,3 +120,33 @@ Wolverine has `IParameterStrategy` extension points. Implement a strategy that:
 
 - `[AggregateHandler]` adoption PRD (after this lands)
 - Optional major-version event-stream rebuild (Option A.b above) — defer indefinitely
+
+## Exploration findings (added after first migration wave)
+
+Attempting `[AggregateHandler]` adoption uncovered two further prereqs beyond deterministic stream IDs:
+
+### Prereq 2 — `IParsable<T>` on strong-typed IDs
+
+CritCrit uses public-id strings (`brand_<guid>`, `subj_<guid>`, `inv_<guid>`) as route parameters. Wolverine's `[Aggregate]` / `[WriteAggregate]` expects the route param type to either be the raw stream identity type (Guid) or implement `TryParse()` so Wolverine can convert.
+
+**Resolved**: `OrgNodeId`, `SubjectId`, `InvitationId` now implement `IParsable<T>` with `TryParse` that accepts both public-id format and raw Guid. Route params can be typed as `OrgNodeId nodeId` instead of `string nodeId` with manual parsing. Validated via `RestoreOrgNode` migration — 6/6 restore tests + 124/124 full integration green.
+
+### Prereq 3 — `SingleStreamProjection<T>` for aggregates Wolverine fetches
+
+`[Aggregate]` / `[WriteAggregate]` triggers `FetchForWriting<TAggregate>` under the hood. Marten requires the aggregate type to be registered as either a `SingleStreamProjection<T>` snapshot or a `SelfAggregate`. EventProjections that write to multiple doc types per event (e.g. `OrgNodeProjection` which maintains `OrgNodeReadModel` + `OrgNodeCodeIndex` + ancestry data) are **not** fetchable.
+
+This is exactly the migration described in `.scratch/projection-cleanup/PRD.md` (candidate #3). Each aggregate's projection must be split into:
+- One `SingleStreamProjection<TAggregate, Guid>` that is the canonical write-model snapshot
+- Zero or more sibling projections (`EventProjection` / `MultiStreamProjection`) that maintain auxiliary documents
+
+Without this split, `[AggregateHandler]` is not viable for that aggregate.
+
+### Net findings
+
+`[AggregateHandler]` adoption is a **three-prereq chain** per aggregate type:
+
+1. **Deterministic stream IDs** (this PRD) — done for grants/config/asset
+2. **IParsable on strong-typed IDs** — done globally (small change)
+3. **SingleStreamProjection** (candidate #3) — must be done per aggregate type
+
+Aggregates where step 3 is straightforward (no cross-doc updates per event): suitable migration targets first. Aggregates where the EventProjection genuinely needs to write multiple doc types per event: a longer-running design problem (the auxiliary docs need to be maintained from sibling projections or from cascading messages).

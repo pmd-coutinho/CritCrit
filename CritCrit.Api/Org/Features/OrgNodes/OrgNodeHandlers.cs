@@ -278,7 +278,9 @@ public static class OrgNodeHandlers
 
     [WolverinePost("/api/brands/{brandId}/org-nodes/{nodeId}/restore")]
     public static async Task<OrgNodeResponse> RestoreOrgNode(
-        string nodeId,
+        // Route-bound via OrgNodeId.TryParse — accepts both public-id ("brand_...")
+        // and raw Guid. 404 if neither parses. See CritCrit.Api/Org/Domain/OrgIds.cs.
+        OrgNodeId nodeId,
         string brandId,
         IDocumentStore store,
         OrgAuthorizationService authorization,
@@ -290,9 +292,7 @@ public static class OrgNodeHandlers
         await using var session = SessionFactory.TenantSession(store, tenant);
         SessionMetadata.StampActor(session, actor);
 
-        if (!OrgPublicId.TryParseOrgNode(nodeId, out var id, out _))
-            throw new DomainException("Invalid org node ID.");
-
+        var id = nodeId;
         var target = await OrgValidation.LoadNodeAsync(session, id, ct);
         if (target.TenantId != tenant.TenantId.Value)
             throw new DomainException("Org node does not belong to the requested brand tenant.");
