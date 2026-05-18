@@ -9,33 +9,6 @@ namespace CritCrit.Api.Org.Features.Brands;
 
 public static class BrandHandlers
 {
-    [WolverinePost("/api/platform/brands")]
-    public static async Task<IResult> CreateBrand(
-        CreateBrandRequest request,
-        IDocumentStore store,
-        OrgAuthorizationService authorization,
-        ActorContext actor,
-        CancellationToken ct)
-    {
-        authorization.EnforceSuperAdmin(actor);
-
-        var id = OrgNodeId.New();
-        await using var session = store.LightweightSession(id.Value.ToString());
-        SessionMetadata.StampActor(session, actor);
-        var normalized = OrgValidation.ValidateAndNormalizeCode(OrgNodeType.Brand, request.Code);
-        await OrgValidation.EnsureCodeAvailableAsync(session, id, normalized, ct);
-
-        session.Events.StartStream<OrgNodeReadModel>(id.Value, new OrgNodeCreated(
-            id, id, null, OrgNodeType.Brand,
-            request.Code.Trim(), normalized, request.Name.Trim()));
-
-        await session.SaveChangesAsync(ct);
-        var node = await session.LoadAsync<OrgNodeReadModel>(id.Value, ct)
-            ?? throw new InvalidOperationException("Projection failed to create OrgNodeReadModel.");
-        var publicId = OrgPublicId.Format(OrgNodeType.Brand, id);
-        return Results.Created($"/api/brands/{publicId}/org-nodes/{publicId}", ToResponse(node));
-    }
-
     [WolverineGet("/api/brands")]
     public static async Task<IReadOnlyList<BrandListItem>> ListMyBrands(
         IDocumentStore store,
