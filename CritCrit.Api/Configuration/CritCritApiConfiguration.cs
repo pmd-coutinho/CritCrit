@@ -329,8 +329,14 @@ public static class CritCritApiConfiguration
         services.AddSingleton(sp =>
         {
             var configuration = sp.GetRequiredService<IConfiguration>();
-            var connectionString = configuration.GetConnectionString("assets")
-                ?? configuration.GetConnectionString("blobs")
+            // Prefer the blob service connection string (SDK-format Endpoint URI
+            // emitted by Aspire's AddBlobs). Aspire's AddBlobContainer emits a
+            // "Endpoint=...;ContainerName=..." form BlobContainerClient cannot
+            // parse, so we pair the blob service URI with Assets:ContainerName.
+            // "assets" remains the fallback for tests where Testcontainers.Azurite
+            // hands back a full DefaultEndpointsProtocol-style connection string.
+            var connectionString = configuration.GetConnectionString("blobs")
+                ?? configuration.GetConnectionString("assets")
                 ?? configuration.GetConnectionString("storage")
                 ?? throw new InvalidOperationException("Asset blob storage connection string is not configured.");
             var containerName = configuration.GetValue("Assets:ContainerName", "assets");

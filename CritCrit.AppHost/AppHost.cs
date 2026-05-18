@@ -22,6 +22,10 @@ var rabbitmq = builder.AddRabbitMQ("rabbitmq")
 
 var storage = builder.AddAzureStorage("storage")
     .RunAsEmulator(emulator => emulator.WithDataVolume());
+// "blobs" is the blob-service connection string (SDK-format URI) the API consumes.
+// "assets" is the container resource — used for declarative container creation +
+// dashboard discovery but its connection string is not SDK-compatible.
+var blobs = storage.AddBlobs("blobs");
 var assets = storage.AddBlobContainer("assets", blobContainerName: "assets");
 
 var mailpit = builder.AddMailPit("mailpit");
@@ -37,6 +41,7 @@ var api = builder.AddProject<CritCrit_Api>("api")
     .WaitFor(keycloak)
     .WithReference(rabbitmq)
     .WaitFor(rabbitmq)
+    .WithReference(blobs)
     .WithReference(assets)
     .WaitFor(assets)
     .WithReference(mailpit)
