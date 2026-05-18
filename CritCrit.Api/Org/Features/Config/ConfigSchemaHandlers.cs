@@ -331,58 +331,7 @@ public static class ConfigSchemaHandlers
             new { DraftId = draftId.Value });
     }
 
-    [WolverinePut("/api/platform/config-schemas/{schemaCode}/drafts/{draftId}")]
-    public static async Task<IResult> UpdateDraft(
-        string schemaCode,
-        Guid draftId,
-        UpdateConfigDraftRequest request,
-        IDocumentStore store,
-        OrgAuthorizationService authorization,
-        ConfigValidationService validation,
-        IAuditWriter audit,
-        ActorContext actor,
-        CancellationToken ct)
-    {
-        authorization.EnforceSuperAdmin(actor);
-        validation.ValidateSchemaDefinition(request.Definition);
-
-        await using var session = SessionFactory.PlatformSession(store);
-        SessionMetadata.StampActor(session, actor);
-
-        var draft = await session.LoadAsync<ConfigSchemaDraftReadModel>(draftId, ct)
-            ?? throw new DomainException("Draft not found.", 404);
-        if (draft.SchemaCode != ConfigCode.Normalize(schemaCode))
-            throw new DomainException("Draft does not belong to the requested schema.");
-        if (draft.Archived)
-            throw new DomainException("Draft is archived.");
-        if (draft.Published)
-            throw new DomainException("Draft is already published; create a new draft.");
-        if (draft.Version != request.ExpectedVersion)
-            throw new DomainException($"Expected version {request.ExpectedVersion}, found {draft.Version}.", 409);
-
-        var now = TimeProvider.System.GetUtcNow();
-        if (!string.IsNullOrWhiteSpace(request.Name) && request.Name.Trim() != draft.Name)
-            session.Events.Append(draft.Id, new ConfigSchemaDraftRenamed(new ConfigDraftId(draft.Id), request.Name.Trim(), now));
-
-        session.Events.Append(draft.Id, new ConfigSchemaDraftUpdated(
-            new ConfigDraftId(draft.Id),
-            request.Definition,
-            now,
-            actor.ExternalId));
-
-        audit.Record(session, new AuditRecord(
-            ConfigAuditActions.DraftUpdated,
-            AuditCategories.Config,
-            AuditSeverities.Info,
-            Actor: actor,
-            Details: new { draft.SchemaCode, DraftId = draft.Id }));
-
-        await session.SaveChangesAsync(ct);
-
-        var refreshed = await session.LoadAsync<ConfigSchemaDraftReadModel>(draftId, ct);
-        return Results.Ok(ToResponse(refreshed!));
-    }
-
+    // UpdateDraft moved to UpdateConfigDraftEndpoint with [WriteAggregate].
     // ArchiveDraft moved to ArchiveConfigDraftEndpoint with [WriteAggregate].
 
     [WolverinePost("/api/platform/config-schemas/{schemaCode}/drafts/{draftId}/publish")]
