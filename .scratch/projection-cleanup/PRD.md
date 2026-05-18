@@ -1,6 +1,28 @@
 # Projection Cleanup: SingleStream Where Possible
 
-Status: design-locked
+Status: **NOT STARTED** (was design-locked)
+
+## Shipped
+
+Nothing yet. All projections still `EventProjection` with `LoadAsync → mutate → Store` patterns.
+
+## Still missing
+
+All of it. Pilot target unchanged: `ConfigSchemaProjection` (152 LOC, 3 doc types, 7 async loads) → four projections:
+1. `ConfigSchemaProjection : SingleStreamProjection<ConfigSchemaReadModel, Guid>`
+2. `ConfigSchemaDraftProjection : SingleStreamProjection<ConfigSchemaDraftReadModel, Guid>`
+3. `ConfigSchemaVersionProjection : EventProjection` (one event → one immutable doc)
+4. `ConfigSchemaDraftPublishedTracker : EventProjection` (deliberate narrow cross-stream exception)
+
+Follow-ups (after pilot lands):
+- `ConfigNodeValueProjection`, `ConfigAssignmentProjection` — same pattern.
+- `OrgNodeProjection` + `OrgNodeCodeIndexProjection` + `MoveOrgNodeProjection` — needs ancestry-tracking design (the EventProjection writes multiple doc types per event today).
+- `SubjectBrandAccessProjection` — multi-stream.
+- `AssetNodeValueProjection` — review.
+
+## Why this matters now
+
+`SingleStreamProjection<T>` registration is the **fourth and final prereq** for `[AggregateHandler]` adoption. `FetchForWriting<TAggregate>` requires the aggregate type to be registered as a snapshot projection or self-aggregate; `EventProjection` doesn't qualify. See `.scratch/deterministic-stream-ids/PRD.md` "Prereq 3" for the discovery.
 Triage: ready-for-human
 Driver: improve-codebase-architecture run on master, 2026-05-18
 

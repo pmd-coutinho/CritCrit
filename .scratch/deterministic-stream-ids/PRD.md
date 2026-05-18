@@ -1,6 +1,30 @@
 # Deterministic Stream IDs for Find-or-Create Aggregates
 
-Status: design
+Status: **MOSTLY SHIPPED** (was design)
+Shipped commits: 9880f78, feba3cc, 16912fa, e7da6c6, c2e8347, 254df23, f9361a2, 0afb5e9, 326c30a
+
+## Shipped
+
+- `CritCrit.Api/Platform/DeterministicGuid.cs` — UUID v5 helper with fixed CritCrit namespace, validated against RFC 4122 DNS-namespace canonical vector.
+- Migrated all five find-or-create-aggregate stream-id sites to `DeterministicGuid.From(...)`:
+  - `OwnerLifecycleHandlers` (Owner pilot)
+  - `AccessGrantHandlers` (general grant)
+  - `InvitationHandlers` (re-grant on accept)
+  - `ConfigHandlers` (config value bag)
+  - `AssetHandlers` (asset value bag)
+- Lazy dual-mode preserved everywhere — pre-existing grants/bags still honour their stored random `StreamId`.
+- `IParsable<T>` on `OrgNodeId` / `SubjectId` / `InvitationId` for route-binding via Wolverine.Http.
+- `JsonConverter<T>` on the same types (DTO field migration deferred).
+- Per-endpoint class shape proven across all multi-endpoint slices (Org/Brand/Owner/Access/Subject/Invitation/Config/Asset).
+
+## Still missing
+
+- **DTO request-body field migration** to strong-typed IDs. JsonConverters are in place, but DTO fields like `GrantOwnerRequest(string SubjectId)` haven't been switched to `GrantOwnerRequest(SubjectId SubjectId)` because 141 test construction sites pass positional string args and need parallel updates. Deferred until a focused test-rewrite pass.
+- **Backfill of legacy random-stream-id records** (Option A.b in the design space). Indefinite defer until needed.
+
+## Unblocks downstream
+
+- `[AggregateHandler]` adoption — three of four prereqs now satisfied (deterministic IDs, `IParsable<T>`, per-endpoint shape). Last gate is the SingleStreamProjection migration in `.scratch/projection-cleanup/`.
 Triage: ready-for-human
 Driver: improve-codebase-architecture follow-up after Owner pilot landed (commit 2eaef61)
 Unblocks: `.scratch/aggregate-handler-workflow/` `[AggregateHandler]` adoption for Owner / Config-node-value / Asset-node-value handlers

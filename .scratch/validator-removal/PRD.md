@@ -1,5 +1,21 @@
 # Validator Removal: FluentValidation → Wolverine Validate Method
 
+Status: **COMPLETE** (was design-locked)
+Shipped commits: 2eaef61, 586b18a, 0afb5e9, 326c30a
+
+## Shipped
+
+- All 15 FluentValidation validators deleted; replaced by Wolverine `Validate` static methods (single `ProblemDetails` return, not `IEnumerable`).
+- `Org/Validators/` directory removed.
+- `WolverineFx.FluentValidation` and `WolverineFx.Http.FluentValidation` package references dropped.
+- `opts.UseFluentValidation()`, `opts.UseFluentValidationProblemDetail()`, `c.UseFluentValidationProblemDetailMiddleware()` wiring removed.
+- 7 multi-endpoint handler classes split into 17 per-endpoint classes to make the Wolverine convention dispatch work (per-class limitation discovered during execution — see prereq below).
+- Shared `OrgValidators` shape helpers added under `Org/Endpoints/`.
+
+## Nothing missing.
+
+Original design status preserved below for reference.
+---
 Status: design-locked
 Triage: ready-for-human
 Driver: improve-codebase-architecture run on master, 2026-05-18

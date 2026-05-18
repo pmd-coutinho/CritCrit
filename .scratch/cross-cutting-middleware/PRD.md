@@ -1,6 +1,22 @@
 # Cross-Cutting Middleware: Tenant + Actor + Auth + Audit
 
-Status: design-locked
+Status: **NOT STARTED** (was design-locked)
+
+## Shipped
+
+Nothing yet. Handlers still take `IDocumentStore` + `BrandTenantContext` + `ActorContext` + `OrgAuthorizationService` + `IAuditWriter` + `IMartenOutbox` as parameters. `SessionFactory.TenantSession` and `SessionMetadata.StampActor` still called inline at the top of every command handler.
+
+## Still missing
+
+All of it:
+
+1. Wolverine tenancy-detection extension at host level (`opts.UseTenancyDetection(...)`) replacing inline `SessionFactory.TenantSession(store, tenant)`.
+2. Actor envelope-header propagation (`Envelope.Headers["actor.*"]` → Marten event headers) replacing inline `SessionMetadata.StampActor(session, actor)`.
+3. `Authorize` Wolverine convention method per endpoint class replacing inline `authorization.EnforceSuperAdmin(actor)` / `EnforceRoleAsync(...)`.
+4. Deprecate `SessionFactory.TenantSession` + `SessionMetadata.StampActor` once all handlers migrate.
+5. `AuditLogProjection` deriving `ImmutableAuditEvent` from emitted events, reading actor + reason from event headers.
+
+Prerequisite: this work is most useful after `[AggregateHandler]` adoption lands, because the handlers stop opening sessions themselves at that point. Order: projection-cleanup → aggregate-handler-workflow → cross-cutting-middleware.
 Triage: ready-for-human
 Driver: improve-codebase-architecture run on master, 2026-05-18
 Depends-on: `.scratch/aggregate-handler-workflow/` (handlers must be aggregate-handler shape first)

@@ -1,6 +1,34 @@
 # Aggregate Handler Workflow + Decider Adoption
 
-Status: design-locked
+Status: **PARTIALLY SHIPPED — transitional shape only** (was design-locked)
+Shipped commits: 2eaef61 (Owner pilot), 586b18a (Brand pilot)
+
+## Shipped — transitional pattern
+
+The Owner and Brand pilots ship a transitional shape that captures the *testability and locality* wins without yet using `[AggregateHandler]`:
+
+- Pure invariants in `OwnerRules` module (unit-testable in isolation).
+- Sibling `LoadAsync` convention method per endpoint for cross-aggregate reads.
+- Wolverine `Validate` static method for shape validation.
+- Per-endpoint static class so the conventions dispatch correctly.
+
+Three Owner endpoint classes (`GrantOwnerEndpoint`, `DowngradeOwnerEndpoint`, `RevokeOwnerEndpoint`) and one Brand endpoint class (`CreateBrandEndpoint`) follow this shape today. Eight more under `Org/Features/OrgNodes/` (`Create*Endpoint`, `*OrgNodeEndpoint`) follow the per-endpoint shape without `LoadAsync` / `Rules`.
+
+## Still missing — real `[AggregateHandler]` adoption
+
+The decide-fn-purity centerpiece (no `IDocumentStore`, no inline `Events.Append/StartStream`, no inline `audit.Record`, no `SessionFactory.TenantSession`) requires:
+
+1. ✅ Deterministic stream IDs — shipped (see `.scratch/deterministic-stream-ids/`)
+2. ✅ `IParsable<T>` on strong-typed IDs — shipped
+3. ✅ Per-endpoint class shape — shipped
+4. ❌ **`SingleStreamProjection<T>` per aggregate** — the last gate; tracked in `.scratch/projection-cleanup/`
+
+Pending (after prereq 4):
+- `[AggregateHandler]` + `[Aggregate]` / `[WriteAggregate]` on Owner / Brand / Access / Subject endpoints.
+- Tuple-return `(CreationResponse, …event)` for write endpoints.
+- `m.Events.UseIdentityMapForAggregates = true` greenfield critter setting.
+- `AuditLogProjection` deriving `ImmutableAuditEvent` from domain events (replaces inline `audit.Record`).
+- Removal of `IDocumentStore` / `IAuditWriter` / `IMartenOutbox` from handler signatures.
 Triage: ready-for-human
 Driver: improve-codebase-architecture run on master, 2026-05-18
 

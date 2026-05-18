@@ -1,6 +1,27 @@
 # Invitation Aggregate Workflow
 
-Status: design-locked
+Status: **NOT STARTED — except cosmetic split** (was design-locked)
+
+## Shipped
+
+- `CreateInvitationEndpoint` and `CancelInvitationEndpoint` extracted from `InvitationHandlers` into per-endpoint classes with `Validate` methods (commit 326c30a). Get/List/Resend/Accept stay in `InvitationHandlers`.
+- Find-or-create stream id on the re-grant path now uses `DeterministicGuid.From(tenant, target, subject)` (feba3cc).
+
+That's it — the actual aggregate-workflow state-machine refactor hasn't started.
+
+## Still missing
+
+All the workflow shape from the original design:
+
+1. New events: `ExternalUserProvisionRequested`, `ExternalUserProvisioned`, `ExternalUserProvisionFailed`, `InvitationEmailRetryScheduled`.
+2. `InvitationRules.cs` pure module.
+3. `InvitationWorkflow` rewrite as `[AggregateHandler]` methods on the existing event stream.
+4. `IdentityProvisioningHandler` — only handler touching `IIdentityProviderProvisioning`.
+5. `InvitationEmailHandler` — only handler touching `IInvitationEmailSender`; Wolverine native retry policy with cooldown.
+6. `InvitationProjection` migration to `SingleStreamProjection<InvitationReadModel, Guid>`.
+7. Delete current `InvitationWorkflow` god-class.
+
+Prerequisite: same chain as everything else — needs `SingleStreamProjection` (candidate #3) to unlock `[AggregateHandler]`.
 Triage: ready-for-human
 Driver: improve-codebase-architecture run on master, 2026-05-18
 Depends-on: `.scratch/aggregate-handler-workflow/` (aggregate-handler convention must land first)

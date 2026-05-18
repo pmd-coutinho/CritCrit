@@ -1,6 +1,24 @@
 # Modular Configuration + Ancillary Stores
 
-Status: design-locked
+Status: **NOT STARTED** (was design-locked)
+
+## Shipped
+
+Nothing. `CritCritApiConfiguration.cs` is still the 488-LOC monolith with central `ConfigureDocumentStorage` (16 schemas) and `ConfigureProjections` (15 inline registrations).
+
+## Still missing
+
+All of it:
+
+1. `ResourceNames.cs` in `CritCrit.ServiceDefaults` — shared resource-name constants consumed by both AppHost and API.
+2. `AddAssetsFeature` pilot — single-store schema move, `[MartenStore(typeof(IAssetsStore))]` on AssetHandlers.
+3. `AddConfigFeature` migration.
+4. `AddInvitationsFeature` migration (depends on `.scratch/invitation-aggregate-workflow/`).
+5. `AddOrgFeature` migration (largest).
+6. `AddObservabilityAudit` ancillary store (depends on `AuditLogProjection` from aggregate-handler-workflow).
+7. `AddPlatformContext` consolidation.
+8. ADR-0003 (Ancillary store per feature module), ADR-0004 (Resource-name contracts).
+9. Cross-store read pattern documentation.
 Triage: ready-for-human
 Driver: improve-codebase-architecture run on master, 2026-05-18
 
