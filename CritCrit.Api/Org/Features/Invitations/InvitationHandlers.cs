@@ -98,7 +98,7 @@ public static class InvitationHandlers
     [WolverineGet("/api/brands/{brandId}/invitations/{invitationId}")]
     public static async Task<InvitationResponse> GetInvitation(
         string brandId,
-        string invitationId,
+        InvitationId invitationId,
         IDocumentStore store,
         OrgAuthorizationService authorization,
         IAuditWriter audit,
@@ -152,7 +152,7 @@ public static class InvitationHandlers
     [WolverinePost("/api/brands/{brandId}/invitations/{invitationId}/cancel")]
     public static async Task<InvitationResponse> CancelInvitation(
         string brandId,
-        string invitationId,
+        InvitationId invitationId,
         CancelInvitationRequest request,
         IDocumentStore store,
         OrgAuthorizationService authorization,
@@ -192,7 +192,7 @@ public static class InvitationHandlers
     [WolverinePost("/api/brands/{brandId}/invitations/{invitationId}/resend")]
     public static async Task<InvitationResponse> ResendInvitation(
         string brandId,
-        string invitationId,
+        InvitationId invitationId,
         IDocumentStore store,
         OrgAuthorizationService authorization,
         IMessageBus bus,
@@ -420,18 +420,15 @@ public static class InvitationHandlers
             invitation.LastSentAt,
             invitation.Failure);
 
-    private static async Task<InvitationReadModel> LoadInvitationAsync(string invitationId, IDocumentStore store, CancellationToken ct)
+    private static async Task<InvitationReadModel> LoadInvitationAsync(InvitationId invitationId, IDocumentStore store, CancellationToken ct)
     {
         await using var query = store.QuerySession();
         return await LoadInvitationAsync(invitationId, query, ct);
     }
 
-    private static async Task<InvitationReadModel> LoadInvitationAsync(string invitationId, IQuerySession session, CancellationToken ct)
+    private static async Task<InvitationReadModel> LoadInvitationAsync(InvitationId invitationId, IQuerySession session, CancellationToken ct)
     {
-        if (!OrgPublicId.TryParseInvitation(invitationId, out var parsed))
-            throw new DomainException("Invalid invitation ID.");
-
-        return await session.LoadAsync<InvitationReadModel>(parsed.Value, ct)
+        return await session.LoadAsync<InvitationReadModel>(invitationId.Value, ct)
             ?? throw new DomainException("Invitation was not found.", 404);
     }
 
