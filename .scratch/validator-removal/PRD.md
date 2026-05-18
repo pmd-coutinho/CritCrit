@@ -42,6 +42,14 @@ Validators **deleted entirely**. No `IValidator<T>` adapters, no FluentValidatio
 - Validation messages localisation
 - Cross-field validation patterns (none currently exist)
 
+## Prerequisite (discovered during execution)
+
+**Per-endpoint-class shape** — Wolverine convention methods are per-class, not per-endpoint. Multi-endpoint handler classes (`OrgNodeHandlers`, `AccessGrantHandlers`, `SubjectHandlers`, `InvitationHandlers`, `ConfigHandlers`, `ConfigAssignmentHandlers`, `AssetHandlers`) must be restructured into one class per endpoint before their FluentValidation validators can be replaced with `Validate` methods.
+
+See `.scratch/deterministic-stream-ids/PRD.md` "Prereq 4 — Per-endpoint class shape" for the codegen failure details.
+
+The Owner pilot already exercises the target shape: `GrantOwnerEndpoint` / `DowngradeOwnerEndpoint` / `RevokeOwnerEndpoint` each in its own static class, each with its own `Validate` + `LoadAsync` + `Handle`. `CreateBrandEndpoint` is a smaller second example.
+
 ## Pilot — Owner feature
 
 3 validators, 41 LOC total:

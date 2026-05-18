@@ -150,3 +150,13 @@ Without this split, `[AggregateHandler]` is not viable for that aggregate.
 3. **SingleStreamProjection** (candidate #3) — must be done per aggregate type
 
 Aggregates where step 3 is straightforward (no cross-doc updates per event): suitable migration targets first. Aggregates where the EventProjection genuinely needs to write multiple doc types per event: a longer-running design problem (the auxiliary docs need to be maintained from sibling projections or from cascading messages).
+
+### Prereq 4 — Per-endpoint class shape
+
+Discovered while attempting validator removal: **Wolverine.Http convention methods (`Validate`, `LoadAsync`, `Before`, ...) are resolved per-class, not per-endpoint.** A class can declare at most one `Validate(TRequest)` method; Wolverine wires that single method into every endpoint on the class regardless of the endpoint's actual request type. Multi-endpoint classes with multiple request types produce JasperFx codegen errors like `UnResolvableVariableException: was unable to resolve a variable of type CreatePlainOrgNodeRequest as part of the method POST_api_brands_brandId_stores`.
+
+The same limitation showed up earlier during the Owner pilot: two `LoadAsync` overloads on the same class produced the same codegen failure.
+
+Practical consequence: any feature with multiple commands that wants to use the `Validate` / `LoadAsync` conventions must follow the **per-endpoint-class shape** demonstrated by the Owner pilot (`GrantOwnerEndpoint` / `DowngradeOwnerEndpoint` / `RevokeOwnerEndpoint`). Multi-endpoint handler classes like `OrgNodeHandlers` (6 endpoints) and `AccessGrantHandlers` (3 endpoints) need restructuring before their FluentValidation validators can be replaced with the Wolverine `Validate` convention.
+
+Alternative for narrow cases: inline shape guards at the top of the handler body, throwing `DomainException` directly. Loses the structured `ProblemDetails` 400 response (becomes a generic `DomainException` 400 via the existing middleware) but avoids the restructure. Acceptable when shape rules are trivial; the structured-error-response value isn't worth the per-endpoint-class restructure on its own.
