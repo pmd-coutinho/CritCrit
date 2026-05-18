@@ -22,6 +22,20 @@ All six original PRDs (under `.scratch/<feature-slug>/PRD.md`) have a **Status**
 - `ArchiveConfigDraftEndpoint` (commit 462e744)
 - `UpdateConfigDraftEndpoint` (commit 23a164f)
 
+### Open puzzle: `[WriteAggregate]` on multi-tenanted aggregates
+
+Attempted to adopt `[WriteAggregate]` on `ConfigAssignmentArchiveEndpoint` (a multi-tenanted aggregate with raw-Guid route + SingleStreamProjection landed in a822a3a). Test failed with 404 from `FetchForWriting` despite the aggregate existing.
+
+Hypothesis: Wolverine `[WriteAggregate]` opens its own Marten session for `FetchForWriting` and that session is **not** tenant-bound, so it cannot see the brand-tenanted `ConfigAssignmentReadModel`. The `IDocumentSession session` parameter is tenant-bound by the existing `AddMartenTenancyDetection` middleware, but `FetchForWriting` may execute before that path.
+
+Successful `[WriteAggregate]` adoptions today (`ArchiveConfigDraftEndpoint`, `UpdateConfigDraftEndpoint`) operate on `ConfigSchemaDraftReadModel` — multi-tenanted under the `"PLATFORM"` sentinel tenant. Maybe Wolverine's session is platform-bound by default, or maybe the path is different for platform vs brand tenants.
+
+Next-session investigation:
+- Check Wolverine.Marten how it sources sessions for `[WriteAggregate]` codegen.
+- Verify if `[Tenant]` parameter (or similar) is required alongside `[WriteAggregate]` on multi-tenanted aggregates.
+- May need explicit tenancy hint on the WriteAggregate attribute or a `Before` method to bind tenant.
+- Until resolved, `[WriteAggregate]` adoption stays on platform-tenanted aggregates only.
+
 ### Operational findings (load-bearing)
 
 - **`Version` field clash with SingleStreamProjection.** Marten reserves `Version` for stream-version metadata. Application-level optimistic-concurrency counter must be named `DocVersion` (or anything other than `Version`). API surface can still expose it as `Version` via response DTO mapping. See `ConfigAssignmentReadModel.DocVersion` (commit a822a3a).
