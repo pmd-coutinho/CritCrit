@@ -23,8 +23,9 @@ The decide-fn-purity centerpiece (no `IDocumentStore`, no inline `Events.Append/
 3. ✅ Per-endpoint class shape — shipped
 4. 🟡 **`SingleStreamProjection<T>` per aggregate** — done for single-tenanted aggregates (ConfigSchema family, Subject, Invitation); blocked for multi-tenanted aggregates by prereq 5
 5. ❌ **Conjoined event-store tenancy (`m.Events.TenancyStyle = TenancyStyle.Conjoined`)** — required to bridge SingleStreamProjection with multi-tenanted doc types. Schema migration + backfill required. Multi-tenanted aggregates: OrgNode, OrgAccessGrant, ConfigAssignment, ConfigNodeValue, AssetNodeValue.
+6. ❌ **Raw-Guid route param OR strong-typed-id Marten registration** — Wolverine `[WriteAggregate("argName")]` only Guid-parses the route value; it does not unwrap public-id strings via SubjectId/InvitationId TryParse. See `.scratch/deterministic-stream-ids/PRD.md` "Prereq 6". `ArchiveConfigDraftEndpoint` (commit 462e744) works because its route is `{draftId}` raw Guid; Subject and Invitation endpoints with public-id routes fail at runtime with 404.
 
-Pending (after prereq 4):
+Pending (after prereqs 4–6):
 - `[AggregateHandler]` + `[Aggregate]` / `[WriteAggregate]` on Owner / Brand / Access / Subject endpoints.
 - Tuple-return `(CreationResponse, …event)` for write endpoints.
 - `m.Events.UseIdentityMapForAggregates = true` greenfield critter setting.
