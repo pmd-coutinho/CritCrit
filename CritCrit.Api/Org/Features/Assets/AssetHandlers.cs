@@ -213,7 +213,9 @@ public static class AssetHandlers
 
         var bagId = AssetNodeValueReadModel.BuildId(tenant.TenantId.Value, node.Id);
         var bag = await session.LoadAsync<AssetNodeValueReadModel>(bagId, ct);
-        var streamId = bag?.StreamId ?? Guid.CreateVersion7();
+        // Deterministic stream id for new asset bags; existing bags honour
+        // their stored random StreamId per .scratch/deterministic-stream-ids/PRD.md.
+        var streamId = bag?.StreamId ?? DeterministicGuid.From(tenant.TenantId.Value, node.Id);
 
         if (bag is null)
         {

@@ -176,7 +176,9 @@ public static class ConfigHandlers
 
         var bagId = ConfigNodeValueReadModel.BuildId(tenant.TenantId.Value, orgNodeId.Value, lookup.Assignment.SchemaCode);
         var bag = await tenantSession.LoadAsync<ConfigNodeValueReadModel>(bagId, ct);
-        var streamId = bag?.StreamId ?? Guid.CreateVersion7();
+        // Deterministic stream id for new value bags; existing bags honour
+        // their stored random StreamId per .scratch/deterministic-stream-ids/PRD.md.
+        var streamId = bag?.StreamId ?? DeterministicGuid.From(tenant.TenantId.Value, orgNodeId.Value, lookup.Assignment.SchemaCode);
 
         if (bag is null)
         {

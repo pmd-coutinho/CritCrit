@@ -133,7 +133,10 @@ public static class AccessGrantHandlers
                 new GrantResponse(updated!.Id, request.OrgNodeId, request.SubjectId, updated.Role, updated.ExpiresAt));
         }
 
-        var streamId = Guid.CreateVersion7();
+        // Deterministic stream id per .scratch/deterministic-stream-ids/PRD.md.
+        // Pre-existing grants from before this migration carry random ids; the
+        // branch above honours them via existingGrant.StreamId.
+        var streamId = DeterministicGuid.From(tenant.TenantId.Value, nodeId.Value, subjectId.Value);
         session.Events.StartStream<OrgAccessGrantReadModel>(streamId,
             new OrgAccessGranted(tenant.TenantId, nodeId, subjectId, request.Role, request.ExpiresAt, OrgAccessGrantSource.DirectGrant, null));
 

@@ -560,7 +560,8 @@ public static class InvitationHandlers
         }
         else
         {
-            var newStreamId = Guid.CreateVersion7();
+            // Deterministic stream id per .scratch/deterministic-stream-ids/PRD.md.
+            var newStreamId = DeterministicGuid.From(invitation.TenantId, invitation.TargetOrgNodeId, subjectId.Value);
             tenantSession.Events.StartStream<OrgAccessGrantReadModel>(newStreamId,
                 new OrgAccessGranted(new OrgNodeId(invitation.TenantId), new OrgNodeId(invitation.TargetOrgNodeId), subjectId, invitation.Role, null, OrgAccessGrantSource.Invitation, invitationId));
             created = true;

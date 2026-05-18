@@ -3,7 +3,6 @@ using CritCrit.Api.Org.Domain;
 using CritCrit.Api.Org.Endpoints;
 using CritCrit.Api.Org.Features.Invitations;
 using CritCrit.Api.Org.Infrastructure;
-using CritCrit.Api.Platform;
 using Marten;
 using Microsoft.AspNetCore.Mvc;
 using Wolverine.Http;
