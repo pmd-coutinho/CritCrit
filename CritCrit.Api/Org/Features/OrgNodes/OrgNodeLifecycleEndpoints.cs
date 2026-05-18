@@ -4,197 +4,24 @@ using CritCrit.Api.Org.Endpoints;
 using CritCrit.Api.Org.Features.Brands;
 using CritCrit.Api.Org.Infrastructure;
 using Marten;
+using Microsoft.AspNetCore.Mvc;
 using Wolverine.Http;
 
 namespace CritCrit.Api.Org.Features.OrgNodes;
 
-public static class OrgNodeHandlers
+public static class ArchiveOrgNodeEndpoint
 {
-    [WolverinePost("/api/brands/{brandId}/countries")]
-    public static async Task<IResult> CreateCountry(
-        CreatePlainOrgNodeRequest request,
-        string brandId,
-        IDocumentStore store,
-        OrgAuthorizationService authorization,
-        IAuditWriter audit,
-        BrandTenantContext tenant,
-        ActorContext actor,
-        CancellationToken ct)
+    public static ProblemDetails Validate(ArchiveOrgNodeRequest request)
     {
-        await using var session = SessionFactory.TenantSession(store, tenant);
-        SessionMetadata.StampActor(session, actor);
-
-        if (!OrgPublicId.TryParseOrgNode(request.ParentId, out var parentId, out _))
-            throw new DomainException("Invalid parent ID.");
-
-        var parent = await ValidateParent(session, actor, authorization, tenant.TenantId.Value, parentId, OrgNodeType.Country, ct);
-
-        var normalized = OrgValidation.ValidateAndNormalizeCode(OrgNodeType.Country, request.Code);
-        await OrgValidation.EnsureCodeAvailableAsync(session, tenant.TenantId, normalized, ct);
-
-        var id = OrgNodeId.New();
-        session.Events.StartStream<OrgNodeReadModel>(id.Value,
-            new OrgNodeCreated(id, tenant.TenantId, parentId, OrgNodeType.Country, request.Code.Trim(), normalized, request.Name.Trim()));
-        audit.Record(session, OrgAudit.Record(
-            OrgAuditActions.OrgNodeCreated,
-            AuditCategories.Org,
-            AuditSeverities.Info,
-            actor,
-            tenant.TenantId.Value,
-            id.Value,
-            details: new { Type = OrgNodeType.Country.ToString(), Code = request.Code.Trim(), Name = request.Name.Trim(), ParentId = parent.PublicId },
-            targetPublicId: OrgPublicId.Format(OrgNodeType.Country, id),
-            targetType: "country",
-            targetLabel: request.Name.Trim()));
-
-        await session.SaveChangesAsync(ct);
-        var node = await session.LoadAsync<OrgNodeReadModel>(id.Value, ct)
-            ?? throw new InvalidOperationException("Projection failed to create OrgNodeReadModel.");
-        var publicId = OrgPublicId.Format(OrgNodeType.Country, id);
-        return Results.Created($"/api/brands/{brandId}/org-nodes/{publicId}", BrandHandlers.ToResponse(node));
+        if (request.Reason is { Length: > 500 })
+            return new ProblemDetails { Title = "reason", Detail = "Reason must be 500 characters or fewer.", Status = 400 };
+        if (request.Force && string.IsNullOrWhiteSpace(request.Reason))
+            return new ProblemDetails { Title = "reason", Detail = "Reason is required when force=true.", Status = 400 };
+        return WolverineContinue.NoProblems;
     }
-
-    [WolverinePost("/api/brands/{brandId}/franchises")]
-    public static async Task<IResult> CreateFranchise(
-        CreatePlainOrgNodeRequest request,
-        string brandId,
-        IDocumentStore store,
-        OrgAuthorizationService authorization,
-        IAuditWriter audit,
-        BrandTenantContext tenant,
-        ActorContext actor,
-        CancellationToken ct)
-    {
-        await using var session = SessionFactory.TenantSession(store, tenant);
-        SessionMetadata.StampActor(session, actor);
-
-        if (!OrgPublicId.TryParseOrgNode(request.ParentId, out var parentId, out _))
-            throw new DomainException("Invalid parent ID.");
-
-        var parent = await ValidateParent(session, actor, authorization, tenant.TenantId.Value, parentId, OrgNodeType.Franchise, ct);
-
-        var normalized = OrgValidation.ValidateAndNormalizeCode(OrgNodeType.Franchise, request.Code);
-        await OrgValidation.EnsureCodeAvailableAsync(session, tenant.TenantId, normalized, ct);
-
-        var id = OrgNodeId.New();
-        session.Events.StartStream<OrgNodeReadModel>(id.Value,
-            new OrgNodeCreated(id, tenant.TenantId, parentId, OrgNodeType.Franchise, request.Code.Trim(), normalized, request.Name.Trim()));
-        audit.Record(session, OrgAudit.Record(
-            OrgAuditActions.OrgNodeCreated,
-            AuditCategories.Org,
-            AuditSeverities.Info,
-            actor,
-            tenant.TenantId.Value,
-            id.Value,
-            details: new { Type = OrgNodeType.Franchise.ToString(), Code = request.Code.Trim(), Name = request.Name.Trim(), ParentId = parent.PublicId },
-            targetPublicId: OrgPublicId.Format(OrgNodeType.Franchise, id),
-            targetType: "franchise",
-            targetLabel: request.Name.Trim()));
-
-        await session.SaveChangesAsync(ct);
-        var node = await session.LoadAsync<OrgNodeReadModel>(id.Value, ct)
-            ?? throw new InvalidOperationException("Projection failed to create OrgNodeReadModel.");
-        var publicId = OrgPublicId.Format(OrgNodeType.Franchise, id);
-        return Results.Created($"/api/brands/{brandId}/org-nodes/{publicId}", BrandHandlers.ToResponse(node));
-    }
-
-    [WolverinePost("/api/brands/{brandId}/stores")]
-    public static async Task<IResult> CreateStore(
-        CreateStoreRequest request,
-        string brandId,
-        IDocumentStore store,
-        OrgAuthorizationService authorization,
-        IAuditWriter audit,
-        BrandTenantContext tenant,
-        ActorContext actor,
-        CancellationToken ct)
-    {
-        await using var session = SessionFactory.TenantSession(store, tenant);
-        SessionMetadata.StampActor(session, actor);
-
-        if (!OrgPublicId.TryParseOrgNode(request.ParentId, out var parentId, out _))
-            throw new DomainException("Invalid parent ID.");
-
-        var parent = await ValidateParent(session, actor, authorization, tenant.TenantId.Value, parentId, OrgNodeType.Store, ct);
-
-        var normalized = OrgValidation.ValidateAndNormalizeCode(OrgNodeType.Store, request.Code);
-        await OrgValidation.EnsureCodeAvailableAsync(session, tenant.TenantId, normalized, ct);
-
-        var id = OrgNodeId.New();
-        var tz = string.IsNullOrWhiteSpace(request.TimeZone) ? "UTC" : request.TimeZone.Trim();
-        session.Events.StartStream<OrgNodeReadModel>(id.Value,
-            new OrgNodeCreated(id, tenant.TenantId, parentId, OrgNodeType.Store, request.Code.Trim(), normalized, request.Name.Trim()));
-        session.Events.Append(id.Value,
-            new StoreProfileCreated(id, tz));
-        audit.Record(session, OrgAudit.Record(
-            OrgAuditActions.OrgNodeCreated,
-            AuditCategories.Org,
-            AuditSeverities.Info,
-            actor,
-            tenant.TenantId.Value,
-            id.Value,
-            details: new { Type = OrgNodeType.Store.ToString(), Code = request.Code.Trim(), Name = request.Name.Trim(), ParentId = parent.PublicId, TimeZone = tz },
-            targetPublicId: OrgPublicId.Format(OrgNodeType.Store, id),
-            targetType: "store",
-            targetLabel: request.Name.Trim()));
-
-        await session.SaveChangesAsync(ct);
-        var node = await session.LoadAsync<OrgNodeReadModel>(id.Value, ct)
-            ?? throw new InvalidOperationException("Projection failed to create OrgNodeReadModel.");
-        var publicId = OrgPublicId.Format(OrgNodeType.Store, id);
-        return Results.Created($"/api/brands/{brandId}/org-nodes/{publicId}", BrandHandlers.ToResponse(node));
-    }
-
-    [WolverinePost("/api/brands/{brandId}/devices")]
-    public static async Task<IResult> CreateDevice(
-        CreateDeviceRequest request,
-        string brandId,
-        IDocumentStore store,
-        OrgAuthorizationService authorization,
-        IAuditWriter audit,
-        BrandTenantContext tenant,
-        ActorContext actor,
-        CancellationToken ct)
-    {
-        await using var session = SessionFactory.TenantSession(store, tenant);
-        SessionMetadata.StampActor(session, actor);
-
-        if (!OrgPublicId.TryParseOrgNode(request.ParentStoreId, OrgNodeType.Store, out var parentStoreId))
-            throw new DomainException("Invalid parent store ID.");
-
-        var parent = await ValidateParent(session, actor, authorization, tenant.TenantId.Value, parentStoreId, OrgNodeType.Device, ct);
-
-        var normalized = OrgValidation.ValidateAndNormalizeCode(OrgNodeType.Device, request.SerialNumber);
-        await OrgValidation.EnsureCodeAvailableAsync(session, tenant.TenantId, normalized, ct);
-
-        var id = OrgNodeId.New();
-        session.Events.StartStream<OrgNodeReadModel>(id.Value,
-            new OrgNodeCreated(id, tenant.TenantId, parentStoreId, OrgNodeType.Device, request.SerialNumber.Trim(), normalized, request.Name.Trim()));
-        session.Events.Append(id.Value,
-            new DeviceProfileCreated(id, request.SerialNumber.Trim(), request.DeviceType));
-        audit.Record(session, OrgAudit.Record(
-            OrgAuditActions.OrgNodeCreated,
-            AuditCategories.Org,
-            AuditSeverities.Info,
-            actor,
-            tenant.TenantId.Value,
-            id.Value,
-            details: new { Type = OrgNodeType.Device.ToString(), SerialNumber = request.SerialNumber.Trim(), Name = request.Name.Trim(), ParentId = parent.PublicId, DeviceType = request.DeviceType.ToString() },
-            targetPublicId: OrgPublicId.Format(OrgNodeType.Device, id),
-            targetType: "device",
-            targetLabel: request.Name.Trim()));
-
-        await session.SaveChangesAsync(ct);
-        var node = await session.LoadAsync<OrgNodeReadModel>(id.Value, ct)
-            ?? throw new InvalidOperationException("Projection failed to create OrgNodeReadModel.");
-        var publicId = OrgPublicId.Format(OrgNodeType.Device, id);
-        return Results.Created($"/api/brands/{brandId}/org-nodes/{publicId}", BrandHandlers.ToResponse(node));
-    }
-
-    // ── Lifecycle ──
 
     [WolverinePost("/api/brands/{brandId}/org-nodes/{nodeId}/archive")]
-    public static async Task<OrgNodeResponse> ArchiveOrgNode(
+    public static async Task<OrgNodeResponse> Handle(
         OrgNodeId nodeId,
         ArchiveOrgNodeRequest request,
         string brandId,
@@ -273,11 +100,14 @@ public static class OrgNodeHandlers
             ?? throw new InvalidOperationException("Projection failed to update OrgNodeReadModel.");
         return BrandHandlers.ToResponse(archived);
     }
+}
+
+public static class RestoreOrgNodeEndpoint
+{
+    // No Validate method — Restore has no request body to shape-check.
 
     [WolverinePost("/api/brands/{brandId}/org-nodes/{nodeId}/restore")]
-    public static async Task<OrgNodeResponse> RestoreOrgNode(
-        // Route-bound via OrgNodeId.TryParse — accepts both public-id ("brand_...")
-        // and raw Guid. 404 if neither parses. See CritCrit.Api/Org/Domain/OrgIds.cs.
+    public static async Task<OrgNodeResponse> Handle(
         OrgNodeId nodeId,
         string brandId,
         IDocumentStore store,
@@ -354,10 +184,22 @@ public static class OrgNodeHandlers
             ?? throw new InvalidOperationException("Projection failed to update OrgNodeReadModel.");
         return BrandHandlers.ToResponse(restored);
     }
+}
+
+public static class HardDeleteOrgNodeEndpoint
+{
+    public static ProblemDetails Validate(HardDeleteOrgNodeRequest request)
+    {
+        if (string.IsNullOrWhiteSpace(request.Reason))
+            return new ProblemDetails { Title = "reason", Detail = "Reason is required.", Status = 400 };
+        if (request.Reason.Length > 500)
+            return new ProblemDetails { Title = "reason", Detail = "Reason must be 500 characters or fewer.", Status = 400 };
+        return WolverineContinue.NoProblems;
+    }
 
     [WolverinePost("/api/brands/{brandId}/org-nodes/{nodeId}/hard-delete")]
     [EmptyResponse]
-    public static async Task HardDeleteOrgNode(
+    public static async Task Handle(
         OrgNodeId nodeId,
         HardDeleteOrgNodeRequest request,
         string brandId,
@@ -436,7 +278,7 @@ public static class OrgNodeHandlers
             new
             {
                 TargetId = target.PublicId,
-                DeletedNodes = subtree.Select(DescribeNode).ToArray(),
+                DeletedNodes = subtree.Select(OrgNodeParentValidation.DescribeNode).ToArray(),
                 RevokedGrantCount = activeGrants.Count(x => x.ExpiresAt is null || x.ExpiresAt > now)
             },
             changes: [new AuditFieldChange("hardDeleted", false, true)],
@@ -446,9 +288,23 @@ public static class OrgNodeHandlers
 
         await session.SaveChangesAsync(ct);
     }
+}
+
+public static class MoveOrgNodeEndpoint
+{
+    public static ProblemDetails Validate(MoveOrgNodeRequest request)
+    {
+        if (string.IsNullOrWhiteSpace(request.NewParentId))
+            return new ProblemDetails { Title = "newParentId", Detail = "newParentId is required.", Status = 400 };
+        if (string.IsNullOrWhiteSpace(request.Reason))
+            return new ProblemDetails { Title = "reason", Detail = "Reason is required.", Status = 400 };
+        if (request.Reason.Length > 500)
+            return new ProblemDetails { Title = "reason", Detail = "Reason must be 500 characters or fewer.", Status = 400 };
+        return WolverineContinue.NoProblems;
+    }
 
     [WolverinePost("/api/brands/{brandId}/org-nodes/{nodeId}/move")]
-    public static async Task<OrgNodeResponse> MoveOrgNode(
+    public static async Task<OrgNodeResponse> Handle(
         OrgNodeId nodeId,
         MoveOrgNodeRequest request,
         string brandId,
@@ -572,36 +428,4 @@ public static class OrgNodeHandlers
             ?? throw new InvalidOperationException("Projection failed to update OrgNodeReadModel.");
         return BrandHandlers.ToResponse(moved);
     }
-
-    // ── Helpers ──
-
-    private static async Task<OrgNodeReadModel> ValidateParent(
-        IDocumentSession session,
-        ActorContext actor,
-        OrgAuthorizationService authorization,
-        Guid tenantId,
-        OrgNodeId parentId,
-        OrgNodeType childType,
-        CancellationToken ct)
-    {
-        var parent = await OrgValidation.LoadActiveNodeAsync(session, parentId, ct);
-
-        if (parent.TenantId != tenantId)
-            throw new DomainException("Org node does not belong to the requested brand tenant.");
-
-        if (!OrgRules.CanContain(parent.Type, childType))
-            throw new DomainException($"{parent.Type} cannot contain {childType}.");
-
-        await authorization.EnforceRoleAsync(session, actor, parent, OrgRole.Admin, ct);
-        return parent;
-    }
-
-    private static object DescribeNode(OrgNodeReadModel node) => new
-    {
-        node.PublicId,
-        node.Type,
-        node.Code,
-        node.Name,
-        node.ParentPublicId
-    };
 }
