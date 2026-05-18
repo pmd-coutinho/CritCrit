@@ -193,9 +193,16 @@ Workable today: routes that take a raw `Guid` directly (e.g. ConfigSchemaDraft e
 
 **C. Dual routes** (public-id + raw-Guid companion per command): technically works but doubles API surface. Bad ergonomics not worth the `[WriteAggregate]` gain.
 
-**Real unlock**: needs upstream Wolverine support for strong-typed-id route binding in `[WriteAggregate]`. Either PR `Wolverine.Marten` to call `SubjectId.TryParse` + `.Value` before `FetchForWriting`, or write a custom Wolverine codegen frame mimicking `[WriteAggregate]` (~200 LOC internals, fragile to version upgrades).
+**Decision: switch command-endpoint routes to raw `Guid` (with `:guid` route constraint).** Consumers go through an SDK that exposes strong-typed IDs at the call surface — URL format is an implementation detail between SDK and API, not part of the consumer contract. Response payloads keep the public-id form (`subj_<guid>`, `brand_<guid>`, etc.) for human readability in logs and dashboards. SDK does the wrap on the way in (extract `.Value.ToString()` from the strong-typed ID) and the unwrap on the way out (parse the public-id string into the strong-typed ID).
 
-Until lifted, `[WriteAggregate]` adoption is constrained to aggregates whose endpoint routes carry the raw `Guid` directly. ConfigSchemaDraft endpoints qualify. Subject, Invitation, ConfigSchema, Owner, Brand, OrgNode all do not (they all use public-id strings in routes).
+Migration scope (one focused session):
+- Command endpoints (`POST` / `PUT` / `PATCH` / `DELETE`) get `{xxxId:guid}` route constraint on their id placeholders.
+- Handler signatures stay strong-typed (`SubjectId subjectId`) — `IParsable<T>` already accepts both formats so the change is non-breaking at the C# level.
+- Test URL construction updated to pass the raw `Guid` form (test helpers centralised).
+- `CritCrit.Web` updated to call raw-Guid routes.
+- Query endpoints (`GET`) where humans paste URLs may keep public-id placeholders if useful.
+
+Once the route migration lands, `[WriteAggregate]` adoption unblocks on every command endpoint. Transitional pattern (Validate + LoadAsync + Handle + manual session/events/save) retires.
 
 ### Prereq 4 — Per-endpoint class shape
 
