@@ -1,9 +1,49 @@
 # Conjoined Event-Store Tenancy
 
-Status: **DESIGN — flip attempted, reverted** (deeper than originally scoped)
+Status: **DESIGN — full attempt iterated to 50→40 failures then reverted**
 Triage: ready-for-human
-Driver: projection-cleanup pilot discovery (commit fec84b1, ConfigAssignment migration attempt)
+Driver: projection-cleanup pilot discovery (commit fec84b1, ConfigAssignment migration attempt) + full attempt iteration (reverted)
 Unblocks: `SingleStreamProjection<T>` for multi-tenanted aggregates → `[AggregateHandler]` adoption on Org / AccessGrant / Config / Asset write models
+
+## Second attempt — full-scope iteration (reverted)
+
+Time-boxed full attempt this session:
+
+1. Added `PlatformTenant.Id = "PLATFORM"` sentinel in `Platform/Tenancy/PlatformTenant.cs`
+2. Switched `SessionFactory.PlatformSession(store)` to `store.LightweightSession(PlatformTenant.Id)`
+3. Flipped `m.Events.TenancyStyle = Marten.Storage.TenancyStyle.Conjoined`
+4. Switched `SubjectReadModel`, `InvitationReadModel`, `ConfigSchemaReadModel`, `ConfigSchemaDraftReadModel` from `SingleTenanted()` → `MultiTenanted()`
+5. Bulk-replaced `store.QuerySession()` → `store.QuerySession(PlatformTenant.Id)` in subject/invitation/config handlers
+
+After all of the above, **40 tests still failed** (124 → 84 passing). The root cause of the remaining failures is **cross-tenant lookup from brand-tenanted handlers**: when a brand-tenanted handler (e.g. `GrantRoleEndpoint`, `OwnerLifecycleHandlers.GrantOwnerEndpoint`) needs to look up a `SubjectReadModel` (now MultiTenanted-platform), it does so via the brand-tenanted session, which now filters by brand tenant and returns no rows. Error string: `"Subject does not exist or is inactive."` from every command that takes a subject id parameter.
+
+~13 callsites identified that need surgery:
+
+- Owner/Brand/Access handlers — subject lookup from brand-tenanted session
+- `AccessGrantHandlers.GrantRole`, `SetGrantExpirationEndpoint` — subject lookup
+- `InvitationWorkflow` — subject lookup + email-uniqueness query
+- `OwnerLifecycleHandlers` (3 endpoints) — subject lookup
+- `ConfigHandlers.PatchValues` — schema lookup from brand-tenanted session
+
+Each needs a separate platform-tenanted session opened just for the cross-tenant lookup, OR Marten cross-tenant query API (`AnyTenant`/`UseTenancyFilter`) applied per-call.
+
+Untested but expected to surface next:
+
+- Wolverine outbox + envelope storage compatibility with conjoined events
+- `RequestActorMiddleware` un-tenanted session resolving actor via ExternalIdentity (Single-tenanted) and Subject (now MultiTenanted)
+- `BrandTenantMiddleware` un-tenanted brand resolution
+- Audit denied-path session
+
+Attempt reverted; tests back to 124/124. Findings preserved for a focused future pass.
+
+### Required follow-up work (out of scope for the architecture run)
+
+1. Research Marten cross-tenant query API: `session.AnyTenant()` / `UseTenancyFilter(false)` / equivalent — confirm which is the supported pattern.
+2. Refactor every cross-tenant lookup (~13 sites identified, more probably below the iceberg) to use the chosen pattern OR open a parallel platform-tenanted session.
+3. Verify Wolverine outbox + envelope storage interact correctly with conjoined events.
+4. Migrate `RequestActorMiddleware` / `BrandTenantMiddleware` un-tenanted sessions to the appropriate tenant context.
+5. Production data migration: backfill `tenant_id` on existing `mt_events`, `mt_streams`, and every newly-MultiTenanted doc.
+
 
 ## Attempted flip (1e0f907 follow-up, reverted)
 
