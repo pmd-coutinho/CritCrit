@@ -16,13 +16,14 @@ public sealed class AssetResolutionService(IDocumentStore store)
     {
         var boundary = target.AncestorIds.Append(target.Id).ToArray();
         var bags = await LoadBagsAsync(target.TenantId, boundary, ct);
+        var localVersion = bags.GetValueOrDefault(target.Id)?.Version ?? 0;
         var keys = bags.Values
             .SelectMany(b => b.Entries.Keys)
             .Distinct(StringComparer.Ordinal)
             .OrderBy(k => k, StringComparer.Ordinal)
             .ToArray();
 
-        return keys.Select(k => ResolveOne(k, boundary, bags)).ToArray();
+        return keys.Select(k => ResolveOne(k, boundary, bags, localVersion)).ToArray();
     }
 
     public async Task<ResolvedAsset> ResolveOneAsync(OrgNodeReadModel target, string key, CancellationToken ct)
@@ -30,13 +31,19 @@ public sealed class AssetResolutionService(IDocumentStore store)
         var normalized = AssetKey.Normalize(key);
         var boundary = target.AncestorIds.Append(target.Id).ToArray();
         var bags = await LoadBagsAsync(target.TenantId, boundary, ct);
-        return ResolveOne(normalized, boundary, bags);
+        var localVersion = bags.GetValueOrDefault(target.Id)?.Version ?? 0;
+        return ResolveOne(normalized, boundary, bags, localVersion);
     }
 
+    // ValueSetVersion always reflects the target node's local bag version so
+    // callers can round-trip it as PatchAsset.expectedVersion regardless of
+    // whether the resolved entry came from a local set, an inherited ancestor,
+    // or a local unset.
     private static ResolvedAsset ResolveOne(
         string key,
         IReadOnlyList<Guid> boundary,
-        Dictionary<Guid, AssetNodeValueReadModel> bags)
+        Dictionary<Guid, AssetNodeValueReadModel> bags,
+        long localValueSetVersion)
     {
         for (var i = boundary.Count - 1; i >= 0; i--)
         {
@@ -50,18 +57,18 @@ public sealed class AssetResolutionService(IDocumentStore store)
                     i == boundary.Count - 1 ? AssetResolutionSource.Local : AssetResolutionSource.Inherited,
                     entry.File,
                     boundary[i].ToString(),
-                    bag.Version),
+                    localValueSetVersion),
                 AssetEntryState.Unset => new ResolvedAsset(
                     key,
                     AssetResolutionSource.Unset,
                     null,
                     boundary[i].ToString(),
-                    bag.Version),
-                _ => new ResolvedAsset(key, AssetResolutionSource.Missing, null, null, 0)
+                    localValueSetVersion),
+                _ => new ResolvedAsset(key, AssetResolutionSource.Missing, null, null, localValueSetVersion)
             };
         }
 
-        return new ResolvedAsset(key, AssetResolutionSource.Missing, null, null, 0);
+        return new ResolvedAsset(key, AssetResolutionSource.Missing, null, null, localValueSetVersion);
     }
 
     private async Task<Dictionary<Guid, AssetNodeValueReadModel>> LoadBagsAsync(

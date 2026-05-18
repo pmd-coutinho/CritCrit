@@ -1,6 +1,7 @@
 using System.Text;
 using CritCrit.Api.Org.Domain;
 using CritCrit.Api.Org.Features.Assets;
+using CritCrit.Api.Platform.Errors;
 
 public sealed class AssetValidationTests
 {

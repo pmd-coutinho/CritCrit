@@ -23,8 +23,8 @@ public sealed class BlobAssetStorage(BlobContainerClient container) : IAssetStor
                 HttpHeaders = new BlobHttpHeaders { ContentType = file.ContentType },
                 Metadata = new Dictionary<string, string>
                 {
-                    ["asset-key-sha256"] = file.Sha256,
-                    ["asset-kind"] = file.Kind.ToString()
+                    ["asset_key_sha256"] = file.Sha256,
+                    ["asset_kind"] = file.Kind.ToString()
                 }
             },
             ct);

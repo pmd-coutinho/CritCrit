@@ -66,6 +66,8 @@ public static class AssetHandlers
     }
 
     [WolverinePut("/api/brands/{brandId}/org-nodes/{nodeId}/assets/{key}")]
+    [RequestSizeLimit(AssetValidation.VideoMaxBytes)]
+    [RequestFormLimits(MultipartBodyLengthLimit = AssetValidation.VideoMaxBytes)]
     public static async Task<IResult> UploadAsset(
         string key,
         string nodeId,

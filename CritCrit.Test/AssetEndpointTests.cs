@@ -130,18 +130,26 @@ public sealed class AssetEndpointTests(ApiFixture fixture) : IntegrationTestBase
         string content,
         long expectedVersion)
     {
-        await Host.Scenario(_ =>
+        var form = new MultipartFormDataContent();
+        form.Add(new StringContent(expectedVersion.ToString()), "expectedVersion");
+        form.Add(new StringContent(""), "reason");
+        var file = new ByteArrayContent(System.Text.Encoding.UTF8.GetBytes(content));
+        file.Headers.ContentType = new MediaTypeHeaderValue(contentType);
+        form.Add(file, "file", fileName);
+
+        try
         {
-            AsSuperAdmin(_);
-            using var form = new MultipartFormDataContent();
-            form.Add(new StringContent(expectedVersion.ToString()), "expectedVersion");
-            form.Add(new StringContent(""), "reason");
-            var file = new ByteArrayContent(System.Text.Encoding.UTF8.GetBytes(content));
-            file.Headers.ContentType = new MediaTypeHeaderValue(contentType);
-            form.Add(file, "file", fileName);
-            _.Put.MultipartFormData(form).ToUrl($"/api/brands/{brandId}/org-nodes/{nodeId}/assets/{key}");
-            _.StatusCodeShouldBe(HttpStatusCode.NoContent);
-        });
+            await Host.Scenario(_ =>
+            {
+                AsSuperAdmin(_);
+                _.Put.MultipartFormData(form).ToUrl($"/api/brands/{brandId}/org-nodes/{nodeId}/assets/{key}");
+                _.StatusCodeShouldBe(HttpStatusCode.NoContent);
+            });
+        }
+        finally
+        {
+            form.Dispose();
+        }
     }
 
     private async Task PatchAssetAsSuperAdmin(string url, PatchAssetRequest request)
